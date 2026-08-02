@@ -1,0 +1,10 @@
+[
+  {
+    "_comment": "genai-agent/app/mocks/sample_risk_scores.json — Owner: Person 1, Week 1-2. Synthetic risk score + dependency data (modeled after ml-engine's real sample-data/sample_metrics.csv and sample_dependencies.csv) used to build and test the agent pipeline before ml-engine's real endpoints exist. Stop using once ml-engine/app/api/risk_score.py and graph_traversal.py are live (~Week 3).",
+    "incident_id": "mock_0001",
+    "service_name": "order-service",
+    "risk_score": 0.87,
+    "predicted_failure_type": "latency_degradation",
+    "dependency_ids": ["payment-service", "inventory-service"]
+  }
+]

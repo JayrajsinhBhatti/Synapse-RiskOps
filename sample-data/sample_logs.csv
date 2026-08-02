@@ -1,0 +1,24 @@
+timestamp,service_name,log_level,message,trace_id,span_id
+2026-07-01T00:00:12Z,api-gateway,INFO,Request received: GET /api/users,trace-001,span-001
+2026-07-01T00:00:15Z,auth-service,INFO,Token validated for user: john.doe,trace-001,span-002
+2026-07-01T00:00:18Z,user-service,INFO,User profile fetched: uid-12345,trace-001,span-003
+2026-07-01T00:05:22Z,api-gateway,WARN,High latency detected: response_time=85ms threshold=50ms,trace-002,span-004
+2026-07-01T00:10:35Z,api-gateway,WARN,Connection pool nearing capacity: 385/400,trace-003,span-005
+2026-07-01T00:15:42Z,order-service,ERROR,Database connection timeout after 5000ms,trace-004,span-006
+2026-07-01T00:15:43Z,order-service,ERROR,Failed to process order: ORD-78542 - ConnectionException,trace-004,span-007
+2026-07-01T00:15:45Z,api-gateway,ERROR,Upstream service error: order-service returned 503,trace-004,span-008
+2026-07-01T00:20:01Z,payment-service,ERROR,Payment gateway timeout: txn-445566,trace-005,span-009
+2026-07-01T00:20:02Z,payment-service,ERROR,Retry attempt 1/3 for payment: txn-445566,trace-005,span-010
+2026-07-01T00:20:05Z,payment-service,ERROR,Retry attempt 2/3 for payment: txn-445566,trace-005,span-011
+2026-07-01T00:20:10Z,payment-service,CRITICAL,Payment processing failed after 3 retries: txn-445566,trace-005,span-012
+2026-07-01T00:20:12Z,order-service,ERROR,Payment failed for order: ORD-78543 - PaymentFailedException,trace-005,span-013
+2026-07-01T00:20:15Z,notification-svc,WARN,Message queue backlog exceeding threshold: 2500 pending,trace-006,span-014
+2026-07-01T00:25:22Z,postgres-primary,WARN,Slow query detected: 2850ms - SELECT * FROM orders WHERE...,trace-007,span-015
+2026-07-01T00:25:25Z,postgres-primary,ERROR,Connection limit reached: 95/100 connections in use,trace-007,span-016
+2026-07-01T00:25:28Z,auth-service,ERROR,Cannot acquire database connection - pool exhausted,trace-008,span-017
+2026-07-01T00:25:30Z,api-gateway,CRITICAL,Circuit breaker OPEN for auth-service - 50% error rate,trace-008,span-018
+2026-07-01T00:30:05Z,postgres-primary,INFO,Connection pool recovered: 42/100 connections in use,trace-009,span-019
+2026-07-01T00:30:08Z,auth-service,INFO,Database connection restored,trace-009,span-020
+2026-07-01T00:30:10Z,api-gateway,INFO,Circuit breaker CLOSED for auth-service,trace-009,span-021
+2026-07-01T00:35:00Z,cache-layer,WARN,Cache hit ratio dropped below threshold: 62% (threshold: 80%),trace-010,span-022
+2026-07-01T00:35:05Z,search-service,WARN,Falling back to database - cache miss for popular queries,trace-010,span-023

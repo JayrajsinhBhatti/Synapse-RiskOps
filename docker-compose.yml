@@ -1,0 +1,172 @@
+# =====================================================
+# Synapse RiskOps - Docker Compose
+# Multi-service orchestration for the full pipeline
+# =====================================================
+# Services:
+#   1. postgres     - PostgreSQL 16 database              [Person 2]
+#   2. backend      - Spring Boot API (Java 21)            [Person 2]
+#   3. ml-engine    - FastAPI ML Engine (Python 3.11)       [Person 2]
+#   4. frontend     - React Dashboard (Vite + Nginx)        [Person 2]
+#   5. genai-agent  - FastAPI + LangGraph RCA agent         [Person 1]
+#   (n8n added in Week 5 once automation workflows exist)  [Person 1]
+# =====================================================
+
+services:
+
+  # ===================================================
+  # PostgreSQL Database
+  # ===================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: synapse-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-synapse_riskops}
+      POSTGRES_USER: ${POSTGRES_USER:-synapse_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapse_dev_2026}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse_admin} -d ${POSTGRES_DB:-synapse_riskops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # Spring Boot Backend
+  # ===================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: synapse-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/synapse_riskops}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-synapse_admin}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-synapse_dev_2026}
+      JWT_SECRET: ${JWT_SECRET:-dev_only_jwt_secret_key_do_not_use_in_production_change_this_immediately_64chars}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      ML_ENGINE_URL: ${ML_ENGINE_URL:-http://ml-engine:8000}
+      GENAI_AGENT_URL: ${GENAI_AGENT_URL:-http://genai-agent:8001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # FastAPI ML Engine
+  # ===================================================
+  ml-engine:
+    build:
+      context: ./ml-engine
+      dockerfile: Dockerfile
+    container_name: synapse-ml-engine
+    restart: unless-stopped
+    ports:
+      - "${ML_ENGINE_PORT:-8000}:8000"
+    environment:
+      ML_ENGINE_HOST: ${ML_ENGINE_HOST:-0.0.0.0}
+      ML_ENGINE_PORT: ${ML_ENGINE_PORT:-8000}
+      ML_ENGINE_LOG_LEVEL: ${ML_ENGINE_LOG_LEVEL:-info}
+      ML_ENGINE_WORKERS: ${ML_ENGINE_WORKERS:-1}
+      ML_ENGINE_CORS_ORIGINS: ${ML_ENGINE_CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+    volumes:
+      - ./sample-data:/app/sample-data:ro
+      - ml_model_data:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # FastAPI + LangGraph GenAI Agent   [Person 1, Week 3+]
+  # ===================================================
+  genai-agent:
+    build:
+      context: ./genai-agent
+      dockerfile: Dockerfile
+    container_name: synapse-genai-agent
+    restart: unless-stopped
+    ports:
+      - "${GENAI_AGENT_PORT:-8001}:8001"
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ML_ENGINE_URL: ${ML_ENGINE_URL:-http://ml-engine:8000}
+    depends_on:
+      - ml-engine
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # React Frontend (Dev Server)
+  # ===================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: synapse-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}
+      VITE_APP_NAME: ${VITE_APP_NAME:-Synapse RiskOps}
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    depends_on:
+      - backend
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # n8n Automation   [Person 1, Week 5 — uncomment once
+  # automation/workflows/*.json are built]
+  # ===================================================
+  # n8n:
+  #   image: n8nio/n8n
+  #   container_name: synapse-n8n
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${N8N_PORT:-5678}:5678"
+  #   networks:
+  #     - synapse-network
+
+# =====================================================
+# Volumes
+# =====================================================
+volumes:
+  postgres_data:
+    driver: local
+  ml_model_data:
+    driver: local
+
+# =====================================================
+# Networks
+# =====================================================
+networks:
+  synapse-network:
+    driver: bridge
+    name: synapse-riskops-network

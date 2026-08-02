@@ -1,0 +1,32 @@
+# ===== Python (ml-engine, genai-agent, evaluation) =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# ===== Java / Maven (backend) =====
+backend/target/
+*.class
+*.jar
+
+# ===== Node / React (frontend) =====
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+node_modules/
+
+# ===== Env / secrets =====
+.env
+*.env.local
+
+# ===== OS / editor =====
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# ===== ML model artifacts =====
+ml-engine/app/models/*.pkl
+ml-engine/app/models/*.joblib

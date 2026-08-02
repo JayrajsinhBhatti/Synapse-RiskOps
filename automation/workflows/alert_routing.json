@@ -1,0 +1,3 @@
+{
+  "_comment": "automation/workflows/alert_routing.json — Owner: Person 1, Week 5. n8n workflow: receives webhook from genai-agent's confidence_router.py, routes alerts to the correct channel/severity path based on risk score and routing_decision (auto_remediate vs escalate). Export the actual n8n workflow JSON here once built in the n8n editor."
+}
