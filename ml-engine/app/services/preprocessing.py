@@ -15,6 +15,7 @@ class DataPreprocessor:
 
     def preprocess_metrics(self):
 
+        # Load metrics dataset
         df = self.loader.load_metrics()
 
         # Remove duplicate rows
@@ -23,20 +24,34 @@ class DataPreprocessor:
         # Remove rows with missing values
         df = df.dropna()
 
-        # Convert timestamp column if present
+        # Convert timestamp column to datetime
         if "timestamp" in df.columns:
             df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-        # Numerical columns to normalize
-        numeric_columns = []
+        # Numeric columns used for ML
+        numeric_columns = [
+            "cpu_usage",
+            "memory_usage",
+            "disk_io",
+            "network_latency_ms",
+            "request_count",
+            "error_rate",
+            "response_time_p99",
+            "active_connections",
+            "gc_pause_ms",
+            "thread_count",
+        ]
 
-        for column in ["cpu", "memory", "disk", "latency"]:
-            if column in df.columns:
-                numeric_columns.append(column)
+        # Keep only columns that actually exist
+        numeric_columns = [
+            col for col in numeric_columns if col in df.columns
+        ]
 
-        # Normalize numeric columns
+        # Normalize numerical features
         if numeric_columns:
-            df[numeric_columns] = self.scaler.fit_transform(df[numeric_columns])
+            df[numeric_columns] = self.scaler.fit_transform(
+                df[numeric_columns]
+            )
 
         return df
 
@@ -54,3 +69,17 @@ if __name__ == "__main__":
     print("\nRows:", cleaned_data.shape[0])
 
     print("Columns:", cleaned_data.shape[1])
+
+    print("\nNormalized Columns:")
+    print(numeric_columns if False else [
+        "cpu_usage",
+        "memory_usage",
+        "disk_io",
+        "network_latency_ms",
+        "request_count",
+        "error_rate",
+        "response_time_p99",
+        "active_connections",
+        "gc_pause_ms",
+        "thread_count",
+    ])
