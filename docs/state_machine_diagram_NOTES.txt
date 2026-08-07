@@ -1,0 +1,7 @@
+docs/state_machine_diagram.png
+Owner: Person 1, Week 1
+
+Draw the end-to-end risk pipeline as a state machine diagram here (export as PNG):
+Start -> Collect Metrics -> Preprocess Data -> ML Risk Prediction ->
+  [Healthy State] or [Incident Detected -> AI Diagnosis -> Generate Mitigation ->
+  Execute Automation -> Verify Recovery -> Healthy Again / Escalate to Engineer] -> End

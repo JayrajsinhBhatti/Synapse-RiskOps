@@ -1,0 +1,3 @@
+{
+  "_comment": "automation/workflows/auto_ticket.json — Owner: Person 1, Week 5. n8n workflow: automatically creates a ticket for incidents escalated to a human engineer, pre-filled with diagnosis and guidance from genai-agent."
+}

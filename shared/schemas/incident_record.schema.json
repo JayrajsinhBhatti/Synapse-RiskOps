@@ -1,0 +1,79 @@
+{
+  "incident_id": "string",
+  "created_at": "ISO8601 timestamp",
+  "service": {
+    "service_name": "string",
+    "environment": "string",
+    "dependency_ids": ["string"]
+  },
+  "prediction": {
+    "predicted_at": "ISO8601 timestamp",
+    "model_name": "string",
+    "risk_score": "float",
+    "risk_threshold": "float",
+    "predicted_failure_type": "string",
+    "prediction_horizon_minutes": "int"
+  },
+  "ground_truth": {
+    "actual_failure_occurred": "bool",
+    "actual_failure_onset_at": "ISO8601 timestamp",
+    "actual_failure_type": "string",
+    "actual_root_cause_service": "string",
+    "actual_root_cause_label": "string",
+    "is_simulated_scenario": "bool",
+    "scenario_id": "string"
+  },
+  "diagnosis": {
+    "diagnosis_started_at": "ISO8601 timestamp",
+    "diagnosis_completed_at": "ISO8601 timestamp",
+    "agent_pipeline": ["string"],
+    "predicted_root_cause_service": "string",
+    "predicted_root_cause_label": "string",
+    "root_cause_candidates_ranked": [
+      { "service": "string", "label": "string", "confidence": "float" }
+    ],
+    "propagation_path": ["string"],
+    "rca_confidence": "float",
+    "gemini_explanation": "string"
+  },
+  "guidance": {
+    "guidance_generated_at": "ISO8601 timestamp",
+    "guidance_steps": ["string"],
+    "guidance_relevance_score": "int|null",
+    "guidance_relevance_rubric_notes": "string|null"
+  },
+  "routing": {
+    "routing_decision": "auto_remediate | escalate",
+    "routing_confidence": "float",
+    "routing_threshold_used": "float",
+    "human_override": "bool",
+    "human_override_reason": "string|null",
+    "was_routing_correct": "bool|null"
+  },
+  "automation": {
+    "automation_triggered_at": "ISO8601 timestamp",
+    "actions_executed": [
+      { "action": "string", "target": "string", "status": "string" }
+    ],
+    "retry_count": "int",
+    "max_retries": "int"
+  },
+  "recovery": {
+    "verification_started_at": "ISO8601 timestamp",
+    "verification_completed_at": "ISO8601 timestamp",
+    "recovery_status": "success | failed",
+    "escalated_to_engineer": "bool",
+    "escalation_reason": "string|null"
+  },
+  "timing_summary": {
+    "lead_time_seconds": "int",
+    "diagnosis_latency_seconds": "int",
+    "time_to_action_seconds": "int",
+    "mttr_seconds": "int",
+    "baseline_manual_mttr_seconds": "int|null"
+  },
+  "feedback_loop": {
+    "used_for_retraining": "bool",
+    "feedback_notes": "string|null"
+  }
+}

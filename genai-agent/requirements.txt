@@ -1,0 +1,9 @@
+# genai-agent/requirements.txt
+# Owner: Person 1
+# Add pinned versions as dependencies are introduced week by week, e.g.:
+# fastapi
+# uvicorn
+# langgraph
+# langchain / google-generativeai (Gemini integration)
+# pydantic
+# httpx  (calling ml-engine's traversal API)

@@ -1,0 +1,3 @@
+{
+  "_comment": "automation/workflows/slack_notify.json — Owner: Person 1, Week 5. n8n workflow: sends formatted Slack/email notifications with incident summary, root cause, and guidance steps when an incident is detected or escalated."
+}
