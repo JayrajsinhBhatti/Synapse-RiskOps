@@ -47,6 +47,9 @@ class DataPreprocessor:
             col for col in numeric_columns if col in df.columns
         ]
 
+        # Keep target/metadata columns intact if present
+        metadata_cols = ["timestamp", "service_name", "is_anomaly"]
+
         # Normalize numerical features
         if numeric_columns:
             df[numeric_columns] = self.scaler.fit_transform(
@@ -55,31 +58,34 @@ class DataPreprocessor:
 
         return df
 
+    def get_features_and_labels(self):
+        """
+        Helper method to extract X (features) and y (is_anomaly label).
+        """
+        df = self.preprocess_metrics()
+        
+        feature_cols = [
+            "cpu_usage", "memory_usage", "disk_io", "network_latency_ms",
+            "request_count", "error_rate", "response_time_p99",
+            "active_connections", "gc_pause_ms", "thread_count"
+        ]
+        feature_cols = [col for col in feature_cols if col in df.columns]
+
+        X = df[feature_cols]
+        y = df["is_anomaly"] if "is_anomaly" in df.columns else None
+
+        return X, y, df
+
 
 if __name__ == "__main__":
-
     processor = DataPreprocessor()
-
     cleaned_data = processor.preprocess_metrics()
 
-    print("\nCleaned Dataset\n")
-
+    print("\n--- Cleaned Dataset ---")
     print(cleaned_data.head())
-
     print("\nRows:", cleaned_data.shape[0])
-
     print("Columns:", cleaned_data.shape[1])
-
-    print("\nNormalized Columns:")
-    print(numeric_columns if False else [
-        "cpu_usage",
-        "memory_usage",
-        "disk_io",
-        "network_latency_ms",
-        "request_count",
-        "error_rate",
-        "response_time_p99",
-        "active_connections",
-        "gc_pause_ms",
-        "thread_count",
-    ])
+    
+    if "is_anomaly" in cleaned_data.columns:
+        print("\nAnomaly Distribution in Ground Truth:")
+        print(cleaned_data["is_anomaly"].value_counts())
