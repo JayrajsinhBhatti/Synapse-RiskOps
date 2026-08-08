@@ -1,4 +1,10 @@
 {
-  "_comment": "sample-data/simulated_incidents/scenario_01.json — Owner: Person 1 (with Person 2), Week 3. One of 5 simulated multi-service incident scenarios with a documented ground-truth root cause, used to test the RCA pipeline end-to-end. Reference the real service names/dependencies from sample_dependencies.csv and docker/postgres/init.sql seed data (e.g. api-gateway, auth-service, payment-service) so scenarios are consistent with Person 2's dependency graph. Structure to match the 'ground_truth' block of shared/schemas/incident_record.schema.json.",
-  "scenario_id": "sim_scenario_01"
+  "scenario_id": "scenario_01",
+  "name": "Order & Payment Service CPU Saturation Cascade",
+  "affected_services": [
+    "order-service",
+    "payment-service"
+  ],
+  "failure_time": "2026-07-03T17:00:00Z",
+  "expected_failure": "cpu_saturation"
 }

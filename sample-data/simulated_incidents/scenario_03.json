@@ -1,0 +1,11 @@
+{
+  "scenario_id": "scenario_03",
+  "name": "Cache Failure & Search Service Latency Storm",
+  "affected_services": [
+    "cache-layer",
+    "search-service",
+    "api-gateway"
+  ],
+  "failure_time": "2026-07-11T18:00:00Z",
+  "expected_failure": "latency_degradation"
+}

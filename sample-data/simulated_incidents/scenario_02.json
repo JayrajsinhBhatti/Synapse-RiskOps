@@ -1,0 +1,12 @@
+{
+  "scenario_id": "scenario_02",
+  "name": "PostgreSQL Primary Memory Leak & Connection Exhaustion",
+  "affected_services": [
+    "postgres-primary",
+    "postgres-replica",
+    "auth-service",
+    "user-service"
+  ],
+  "failure_time": "2026-07-07T18:00:00Z",
+  "expected_failure": "memory_exhaustion"
+}
