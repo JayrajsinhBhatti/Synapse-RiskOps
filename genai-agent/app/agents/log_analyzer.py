@@ -11,3 +11,21 @@ First agent in the LangGraph RCA pipeline.
 - Can be built and unit-tested now against app/mocks/sample_risk_scores.json,
   before ml-engine's real endpoints exist
 """
+
+class LogAnalyzer:
+  def analyze(self, state):
+    logs = state['logs']
+    services = {}
+    
+    # replace fake logs with GET /api/incidents or GET /logs
+    for log in logs:
+      service = log['service']
+      
+      if service not in services:
+        services[service] = []
+        
+      services[service].append(log['message'])
+      
+    return {
+      "observations": services
+    }

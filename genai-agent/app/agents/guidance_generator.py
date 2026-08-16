@@ -9,3 +9,52 @@ Third agent in the LangGraph RCA pipeline.
   predicted failure actually occurs
 - Output matches the "guidance" block of shared/schemas/incident_record.schema.json
 """
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import PromptTemplate
+from dotenv import load_dotenv
+
+load_dotenv()
+
+llm = ChatGoogleGenerativeAI(model='gemini-2.5-flash-lite')
+
+prompt = PromptTemplate(
+    template="""
+You are an experienced Site Reliability Engineer.
+
+Root cause identified:
+{root_cause}
+
+Generate practical guidance for the incident.
+
+Return ONLY valid JSON in this format:
+
+{{
+    "guidance": {{
+        "summary": "",
+        "immediate_actions": [
+            ""
+        ],
+        "preventive_measures": [
+            ""
+        ]
+    }}
+}}
+""",
+    input_variables=["root_cause"]
+)
+
+parser = JsonOutputParser()
+
+chain = prompt | llm | parser
+
+def guidance_generator(state):
+  root_cause = state['root_cause_candidates_ranked'][0]
+  
+  response = chain.invoke({
+    'root_cause': root_cause
+  })
+  
+  return {
+    'guidance': response['guidance']
+  }
