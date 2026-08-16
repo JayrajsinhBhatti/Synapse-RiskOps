@@ -1,6 +1,4 @@
 """
-Synapse RiskOps - Anomaly Detector (Isolation Forest)
-======================================================
 Owner: Person 2 | Week: 2
 
 Unsupervised anomaly detection using scikit-learn's Isolation Forest.
@@ -8,6 +6,7 @@ Trains on historical server metrics and produces anomaly scores (0-1)
 for incoming service metric snapshots.
 
 Key design decisions:
+
 - contamination=0.03 (expect ~3% anomalies in training data)
 - Scores are normalized to [0, 1] where 1 = most anomalous
 - Feature importance is approximated via single-feature ablation
@@ -17,6 +16,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from loguru import logger
 from typing import Dict, List, Tuple, Optional
 
@@ -59,15 +59,11 @@ class AnomalyDetector:
     def train(self, df: pd.DataFrame) -> Dict:
         """
         Train the Isolation Forest on historical metrics.
-
-        Args:
-            df: DataFrame with columns matching FEATURE_COLUMNS.
-
-        Returns:
-            Training summary dict with stats.
         """
+
         # Extract and validate feature columns
         available_features = [c for c in self.FEATURE_COLUMNS if c in df.columns]
+
         if len(available_features) < 3:
             raise ValueError(
                 f"Need at least 3 feature columns. Found: {available_features}"
@@ -110,19 +106,14 @@ class AnomalyDetector:
     def predict(self, metrics: Dict) -> Tuple[float, bool, List[str]]:
         """
         Score a single service metrics snapshot.
-
-        Args:
-            metrics: Dict with keys matching FEATURE_COLUMNS.
-
-        Returns:
-            Tuple of (anomaly_score, is_anomaly, top_contributing_features).
-            anomaly_score is in [0, 1] where 1 = most anomalous.
         """
+
         if not self.is_trained:
             raise RuntimeError("AnomalyDetector has not been trained. Call train() first.")
 
         # Build feature vector
         feature_values = []
+
         for col in self._trained_features:
             val = metrics.get(col, 0.0)
             feature_values.append(float(val))
@@ -130,29 +121,35 @@ class AnomalyDetector:
         X = pd.DataFrame([feature_values], columns=self._trained_features)
         X_scaled = self.scaler.transform(X)
 
-        # Get anomaly score (normalized to 0-1)
+        # Get anomaly score
         score = self._raw_scores(X_scaled)[0]
 
         # Determine if anomaly
-        is_anomaly = score > 0.55  # Calibrated threshold
+        is_anomaly = score > 0.55
 
-        # Find top contributing features via deviation from mean
+        # Find top contributing features
         contributions = self._feature_contributions(feature_values)
-        top_features = sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_features = sorted(
+            contributions.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:3]
+
         top_feature_names = [f[0] for f in top_features]
 
         return score, is_anomaly, top_feature_names
 
     def predict_batch(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Score a batch of metrics rows. Adds 'anomaly_score' and
-        'is_anomaly_predicted' columns to the returned DataFrame.
+        Score a batch of metrics rows.
         """
+
         if not self.is_trained:
             raise RuntimeError("AnomalyDetector has not been trained. Call train() first.")
 
         X = df[self._trained_features].fillna(0)
         X_scaled = self.scaler.transform(X)
+
         scores = self._raw_scores(X_scaled)
 
         result = df.copy()
@@ -161,30 +158,56 @@ class AnomalyDetector:
 
         return result
 
+    def evaluate(self, df: pd.DataFrame) -> Dict:
+        """
+        Evaluate predictions using ground-truth is_anomaly labels.
+        """
+
+        if "is_anomaly" not in df.columns:
+            raise ValueError("DataFrame must contain 'is_anomaly' column.")
+
+        results = self.predict_batch(df)
+
+        y_true = df["is_anomaly"].astype(int)
+        y_pred = results["is_anomaly_predicted"].astype(int)
+
+        return {
+            "accuracy": accuracy_score(y_true, y_pred),
+            "precision": precision_score(y_true, y_pred, zero_division=0),
+            "recall": recall_score(y_true, y_pred, zero_division=0),
+            "f1_score": f1_score(y_true, y_pred, zero_division=0),
+        }
+
     def _raw_scores(self, X_scaled: np.ndarray) -> np.ndarray:
         """
         Convert Isolation Forest's decision_function output to [0, 1] range.
-        IsolationForest.decision_function returns negative scores for anomalies,
-        positive for normal points. We invert and normalize.
         """
+
         raw = self.model.decision_function(X_scaled)
+
         # Invert: more negative = more anomalous -> higher score
-        # Normalize using sigmoid-like transform
         scores = 1.0 / (1.0 + np.exp(5 * raw))
+
         return np.clip(scores, 0.0, 1.0)
 
     def _feature_contributions(self, feature_values: List[float]) -> Dict[str, float]:
         """
-        Approximate feature importance by computing z-score deviation
-        from training distribution for each feature.
+        Approximate feature importance using z-score deviation
+        from training distribution.
         """
+
         contributions = {}
+
         for i, col in enumerate(self._trained_features):
             if self._feature_stds[i] > 0:
-                z = abs(feature_values[i] - self._feature_means[i]) / self._feature_stds[i]
+                z = abs(
+                    feature_values[i] - self._feature_means[i]
+                ) / self._feature_stds[i]
             else:
                 z = 0.0
+
             contributions[col] = float(z)
+
         return contributions
 
 
@@ -196,6 +219,7 @@ if __name__ == "__main__":
 
     detector = AnomalyDetector()
     summary = detector.train(df)
+
     print("\n--- Training Summary ---")
     for k, v in summary.items():
         print(f"  {k}: {v}")
@@ -215,12 +239,27 @@ if __name__ == "__main__":
     }
 
     score, is_anom, top_feats = detector.predict(test_metrics)
-    print(f"\n--- Single Prediction ---")
+
+    print("\n--- Single Prediction ---")
     print(f"  Score: {score:.4f}")
     print(f"  Is Anomaly: {is_anom}")
     print(f"  Top Features: {top_feats}")
 
     # Test batch prediction
     results = detector.predict_batch(df.head(20))
-    print(f"\n--- Batch Prediction (first 20 rows) ---")
-    print(results[["service_name", "anomaly_score", "is_anomaly_predicted"]].to_string())
+
+    print("\n--- Batch Prediction (first 20 rows) ---")
+    print(
+        results[
+            ["service_name", "anomaly_score", "is_anomaly_predicted"]
+        ].to_string()
+    )
+
+    # Evaluate against ground-truth labels
+    evaluation = detector.evaluate(df)
+
+    print("\n--- Evaluation ---")
+    print(f"  Accuracy:  {evaluation['accuracy']:.4f}")
+    print(f"  Precision: {evaluation['precision']:.4f}")
+    print(f"  Recall:    {evaluation['recall']:.4f}")
+    print(f"  F1 Score:  {evaluation['f1_score']:.4f}")
