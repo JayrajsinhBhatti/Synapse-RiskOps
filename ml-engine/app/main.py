@@ -1,7 +1,7 @@
 """
 Synapse RiskOps - FastAPI ML Engine
 ====================================
-Owner: Person 2 | Week: 1-2
+Owner: Person 2 | Week: 1-3
 
 Main entry point for the ML Engine service.
 - Registers all API routers (risk scoring, data ingestion, graph traversal)
@@ -19,7 +19,8 @@ from typing import Optional
 from app.core.config import settings
 from app.services.risk_engine import RiskEngine
 from app.services.csv_loader import CSVLoader
-from app.api import risk_score, ingest
+from app.api import risk_score, ingest, graph_traversal
+from app.services.graph_builder import get_graph_builder
 
 
 # =====================================================
@@ -67,6 +68,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Model training failed on startup: {e}. Service will start but scoring will be unavailable.")
 
+    # Build dependency graph
+    try:
+        graph_builder = get_graph_builder()
+        logger.info(
+            f"Dependency graph built: {graph_builder.graph.number_of_nodes()} nodes, "
+            f"{graph_builder.graph.number_of_edges()} edges"
+        )
+    except Exception as e:
+        logger.error(f"Graph building failed: {e}. Graph endpoints will auto-initialize on first request.")
+
     yield  # Application runs here
 
     # Shutdown cleanup
@@ -84,7 +95,7 @@ app = FastAPI(
         "composite risk scoring, and dependency graph APIs for the "
         "Synapse RiskOps autonomous risk operations pipeline."
     ),
-    version="0.2.0",
+    version="0.3.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -113,6 +124,7 @@ app.add_middleware(
 # =====================================================
 app.include_router(risk_score.router)
 app.include_router(ingest.router)
+app.include_router(graph_traversal.router)
 
 
 # =====================================================
@@ -130,7 +142,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "ml-engine",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "models_ready": models_ready,
     }
 
@@ -140,7 +152,7 @@ async def root():
     """Root endpoint with service information."""
     return {
         "service": "Synapse RiskOps - ML Engine",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "docs": "/docs",
         "health": "/health",
         "endpoints": {
@@ -149,5 +161,8 @@ async def root():
             "ingest_metrics": "POST /api/ingest/metrics",
             "ingest_logs": "POST /api/ingest/logs",
             "model_status": "GET /api/model/status",
+            "graph_traverse": "GET /api/graph/traverse?service={name}",
+            "graph_topology": "GET /api/graph/topology",
+            "graph_blast_radius": "GET /api/graph/blast-radius?service={name}",
         },
     }
