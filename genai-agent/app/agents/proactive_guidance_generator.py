@@ -1,30 +1,25 @@
-# This agent should take:
-
+# This agent takes:
+#
 # risk score
 # predicted failure
+# prediction horizon
 # root cause
 # root cause confidence
-# dependency information
+# dependency information (propagation path)
+# logs
 
-# info regarding the curr architecture
-
-# generator should return something like:
-
+# and returns:
+#
 # {
 #   "guidance_steps": [
 #     "Inspect payment-service database connection utilization immediately.",
 #     "Check for abnormal connection growth or stale connections.",
-#     "Reduce unnecessary connection churn where identified.",
-#     "Increase the database connection pool only if database capacity allows.",
-#     "Monitor payment-service latency and connection utilization for the next 10 minutes.",
-#     "Escalate if connection utilization continues increasing despite mitigation."
+#     ...
 #   ],
 #   "guidance_relevance_score": 94,
-#   "guidance_relevance_rubric_notes": "The guidance directly addresses the predicted latency degradation through preventive monitoring and mitigation of the identified database connection exhaustion."
+#   "guidance_relevance_rubric_notes": "..."
 # }
 
-# from app.agents.root_cause_identifier import root_cause_identifier
-# from ml_node import get_ml_prediction
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -45,7 +40,7 @@ class ProactiveGuidance(BaseModel):
     guidance_relevance_rubric_notes: str = Field(
         description="Brief explanation of why the guidance is relevant"
     )
-    
+
 prompt = ChatPromptTemplate.from_messages([
     (
     "system",
@@ -99,22 +94,55 @@ structured_llm = llm.with_structured_output(ProactiveGuidance)
 
 chain = prompt | structured_llm
 
-result = chain.invoke({
-    "service": "order-service",
-    "risk_score": 0.87,
-    "predicted_failure_type": "latency_degradation",
-    "prediction_horizon_minutes": 15,
-    "root_cause_service": "payment-service",
-    "root_cause": "database connection exhaustion",
-    "rca_confidence": 0.91,
-    "propagation_path": [
-        "payment-service",
-        "order-service"
-    ],
-    "logs": [
-        "Database connection pool utilization reached 92%",
-        "Payment service latency increased by 38%"
-    ]
-})
 
-print(result)
+def proactive_guidance_generator(state: dict) -> dict:
+    """
+    LangGraph node — generates proactive (preventive) guidance using the
+    ML Engine's prediction and the RCA agent's ranked root causes.
+
+    Reads from state:
+      metrics, risk_score, predicted_failure_type, prediction_horizon_minutes,
+      root_cause_candidates_ranked, dependency_graph, logs
+
+    Writes to state:
+      guidance (ProactiveGuidance as dict)
+    """
+    metrics: dict = state.get("metrics", {})
+    service = metrics.get("service_name", "unknown")
+
+    risk_score = state.get("risk_score", 0)
+    predicted_failure_type = state.get("predicted_failure_type", "unknown")
+    prediction_horizon_minutes = state.get("prediction_horizon_minutes", 0)
+
+    candidates = state.get("root_cause_candidates_ranked", [])
+    top_candidate = candidates[0] if candidates else {}
+    root_cause_service = top_candidate.get("affected_services", [service])[0] if top_candidate else service
+    root_cause = top_candidate.get("cause", "unknown")
+    rca_confidence = top_candidate.get("confidence", 0)
+
+    dependency_graph = state.get("dependency_graph", {})
+    propagation_path = dependency_graph.get("upstream_dependencies", []) or [service]
+
+    logs = state.get("logs", [])
+    log_messages = [log.get("message", str(log)) for log in logs]
+
+    result: ProactiveGuidance = chain.invoke({
+        "service": service,
+        "risk_score": risk_score,
+        "predicted_failure_type": predicted_failure_type,
+        "prediction_horizon_minutes": prediction_horizon_minutes,
+        "root_cause_service": root_cause_service,
+        "root_cause": root_cause,
+        "rca_confidence": rca_confidence,
+        "propagation_path": propagation_path,
+        "logs": log_messages,
+    })
+
+    return {
+        "guidance": {
+            "summary": result.guidance_relevance_rubric_notes,
+            "immediate_actions": result.guidance_steps,
+            "preventive_measures": [],
+            "relevance_score": result.guidance_relevance_score,
+        }
+    }

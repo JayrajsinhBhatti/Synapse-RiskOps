@@ -1,0 +1,26 @@
+{
+  "metrics": {
+    "service_name": "order-service",
+    "cpu_usage": 78.5,
+    "memory_usage": 85.2,
+    "disk_io": 32.1,
+    "network_latency_ms": 45.3,
+    "request_count": 5200,
+    "error_rate": 8.5,
+    "response_time_p99": 180.0,
+    "active_connections": 120,
+    "gc_pause_ms": 12.5,
+    "thread_count": 48,
+    "timestamp": "2026-08-30T21:58:00Z"
+  },
+  "logs": [
+    {
+      "service": "order-service",
+      "message": "DB connection timeout after 5s"
+    },
+    {
+      "service": "payment-service",
+      "message": "Connection pool utilization 92%"
+    }
+  ]
+}
