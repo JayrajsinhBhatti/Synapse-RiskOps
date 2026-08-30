@@ -73,6 +73,7 @@ async def diagnose(request: DiagnoseRequest):
         root_cause_candidates_ranked=result.get("root_cause_candidates_ranked", []),
         guidance=result.get("guidance"),
         routing_decision=result.get("routing_decision", "escalate"),
+        routing_reason=result.get("routing_reason", ""),
     )
 
 

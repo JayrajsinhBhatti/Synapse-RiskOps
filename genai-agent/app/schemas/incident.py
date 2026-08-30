@@ -56,6 +56,7 @@ class GuidanceBlock(BaseModel):
     summary: str = ""
     immediate_actions: List[str] = Field(default_factory=list)
     preventive_measures: List[str] = Field(default_factory=list)
+    relevance_score: int = 0
 
 
 class DiagnoseResponse(BaseModel):
@@ -81,3 +82,4 @@ class DiagnoseResponse(BaseModel):
 
     # Routing decision
     routing_decision: str = "escalate"   # "auto_remediate" | "escalate"
+    routing_reason: str = ""
