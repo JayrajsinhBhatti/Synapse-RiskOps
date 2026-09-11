@@ -59,7 +59,10 @@ Return ONLY valid JSON in this format:
     input_variables=["observations", "dependency_graph", "risk_score", "predicted_failure_type"]
 )
 
-llm = ChatGoogleGenerativeAI(model='gemini-2.5-flash-lite')
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
+)
 parser = JsonOutputParser()
 
 chain = prompt | llm | parser

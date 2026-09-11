@@ -88,7 +88,7 @@ services:
       ML_ENGINE_WORKERS: ${ML_ENGINE_WORKERS:-1}
       ML_ENGINE_CORS_ORIGINS: ${ML_ENGINE_CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
     volumes:
-      - ./sample-data:/app/sample-data:ro
+      - ./sample-data:/sample-data:ro
       - ml_model_data:/app/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -102,19 +102,26 @@ services:
   # ===================================================
   # FastAPI + LangGraph GenAI Agent   [Person 1, Week 3+]
   # ===================================================
+  # ===================================================
+  # FastAPI + LangGraph GenAI Agent   [Person 1, Week 3+]
+  # ===================================================
   genai-agent:
     build:
       context: ./genai-agent
-      dockerfile: Dockerfile
     container_name: synapse-genai-agent
     restart: unless-stopped
+
+    depends_on:
+      - ml-engine
+
     ports:
-      - "${GENAI_AGENT_PORT:-8001}:8001"
+      - "8001:8001"
+
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       ML_ENGINE_URL: ${ML_ENGINE_URL:-http://ml-engine:8000}
-    depends_on:
-      - ml-engine
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/alert}
+
     networks:
       - synapse-network
 
@@ -141,18 +148,25 @@ services:
     networks:
       - synapse-network
 
+    # ===================================================
+  # n8n Automation
   # ===================================================
-  # n8n Automation   [Person 1, Week 5 — uncomment once
-  # automation/workflows/*.json are built]
-  # ===================================================
-  # n8n:
-  #   image: n8nio/n8n
-  #   container_name: synapse-n8n
-  #   restart: unless-stopped
-  #   ports:
-  #     - "${N8N_PORT:-5678}:5678"
-  #   networks:
-  #     - synapse-network
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: synapse-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-synapse_n8n_2026}
+      WEBHOOK_URL: "http://n8n:5678"
+      GENERIC_TIMEZONE: "Asia/Kolkata"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - synapse-network
 
 # =====================================================
 # Volumes
@@ -161,6 +175,8 @@ volumes:
   postgres_data:
     driver: local
   ml_model_data:
+    driver: local
+  n8n_data:
     driver: local
 
 # =====================================================

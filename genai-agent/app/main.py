@@ -10,6 +10,9 @@ FastAPI application entrypoint for the GenAI Agent service.
   (see shared/api-contracts.md for the contract)
 """
 
+import os
+
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
@@ -38,6 +41,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+N8N_WEBHOOK_URL = os.getenv(
+    "N8N_WEBHOOK_URL",
+    "http://n8n:5678/webhook/alert",
+)
+
 
 @app.post("/diagnose", response_model=DiagnoseResponse)
 async def diagnose(request: DiagnoseRequest):
@@ -63,24 +71,49 @@ async def diagnose(request: DiagnoseRequest):
         logger.error(f"Pipeline failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Pipeline error: {exc}")
 
-    return DiagnoseResponse(
+    response = DiagnoseResponse(
         service_name=request.metrics.service_name,
         risk_score=result.get("risk_score", 0),
         risk_tier=result.get("risk_tier", "unknown"),
         prediction_confidence=result.get("prediction_confidence", 0),
         predicted_failure_type=result.get("predicted_failure_type", "none"),
         prediction_horizon_minutes=result.get("prediction_horizon_minutes", 0),
-        root_cause_candidates_ranked=result.get("root_cause_candidates_ranked", []),
+        root_cause_candidates_ranked=result.get(
+            "root_cause_candidates_ranked", []
+        ),
         guidance=result.get("guidance"),
         routing_decision=result.get("routing_decision", "escalate"),
         routing_reason=result.get("routing_reason", ""),
     )
 
+    # Send the diagnosis and routing decision to n8n
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(
+                N8N_WEBHOOK_URL,
+                json=response.model_dump(),
+            )
+
+        logger.info(
+            f"Sent routing decision to n8n: "
+            f"{response.routing_decision}"
+        )
+
+    except Exception as exc:
+        # n8n failure should not make the diagnosis itself fail
+        logger.warning(f"Failed to send alert to n8n: {exc}")
+
+    return response
+
 
 @app.get("/health", tags=["System"])
 async def health():
     """Health check used by Docker and load balancers."""
-    return {"status": "healthy", "service": "genai-agent", "version": "0.3.0"}
+    return {
+        "status": "healthy",
+        "service": "genai-agent",
+        "version": "0.3.0",
+    }
 
 
 @app.get("/", tags=["System"])
@@ -91,6 +124,6 @@ async def root():
         "docs": "/docs",
         "endpoints": {
             "diagnose": "POST /diagnose",
-            "health":   "GET /health",
+            "health": "GET /health",
         },
     }
