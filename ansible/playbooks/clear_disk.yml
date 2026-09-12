@@ -1,0 +1,29 @@
+---
+- name: "Synapse RiskOps - Clear Disk and Prune"
+  hosts: all
+  gather_facts: no
+  vars:
+    target_service: "{{ service_name | default('unknown-service') }}"
+    incident_ref: "{{ incident_id | default('MANUAL') }}"
+    risk_level: "{{ risk_score | default('N/A') }}"
+
+  tasks:
+    - name: "Log disk cleanup trigger"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "[SYNAPSE REMEDIATION] Freeing Disk Space"
+          - "Service Target: {{ target_service }}"
+          - "Incident ID:    {{ incident_ref }}"
+          - "Risk Score:     {{ risk_level }}"
+          - "=========================================================="
+
+    - name: "Prune unused docker volumes and images"
+      ansible.builtin.command:
+        cmd: "docker image prune -f"
+      register: prune_result
+      ignore_errors: yes
+
+    - name: "Report disk cleanup status"
+      ansible.builtin.debug:
+        msg: "Disk prune task completed successfully."

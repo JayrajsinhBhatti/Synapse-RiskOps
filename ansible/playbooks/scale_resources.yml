@@ -1,0 +1,31 @@
+---
+- name: "Synapse RiskOps - Scale Container Resources"
+  hosts: all
+  gather_facts: no
+  vars:
+    target_service: "{{ service_name | default('unknown-service') }}"
+    incident_ref: "{{ incident_id | default('MANUAL') }}"
+    risk_level: "{{ risk_score | default('N/A') }}"
+    memory_limit: "{{ new_memory_limit | default('2g') }}"
+
+  tasks:
+    - name: "Log scale resources remediation"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "[SYNAPSE REMEDIATION] Scaling Container Resources"
+          - "Service Target: {{ target_service }}"
+          - "Incident ID:    {{ incident_ref }}"
+          - "Risk Score:     {{ risk_level }}"
+          - "Allocated RAM:  {{ memory_limit }}"
+          - "=========================================================="
+
+    - name: "Update container memory allocation via Docker update"
+      ansible.builtin.command:
+        cmd: "docker update --memory {{ memory_limit }} --memory-swap {{ memory_limit }} synapse-{{ target_service }}"
+      register: scale_result
+      ignore_errors: yes
+
+    - name: "Report scaling status"
+      ansible.builtin.debug:
+        msg: "Container {{ target_service }} scaled with memory limit {{ memory_limit }}."

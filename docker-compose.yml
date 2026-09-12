@@ -163,8 +163,125 @@ services:
       N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-synapse_n8n_2026}
       WEBHOOK_URL: "http://n8n:5678"
       GENERIC_TIMEZONE: "Asia/Kolkata"
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
     volumes:
       - n8n_data:/home/node/.n8n
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # Redis Cache / Message Queue
+  # ===================================================
+  redis:
+    image: redis:7-alpine
+    container_name: synapse-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # Ansible Semaphore (Ansible UI & API Control Plane)
+  # ===================================================
+  semaphore:
+    image: semaphoreui/semaphore:latest
+    container_name: synapse-semaphore
+    restart: unless-stopped
+    ports:
+      - "${SEMAPHORE_PORT:-3000}:3000"
+    environment:
+      SEMAPHORE_DB_DIALECT: postgres
+      SEMAPHORE_DB_HOST: postgres
+      SEMAPHORE_DB_PORT: 5432
+      SEMAPHORE_DB_USER: ${POSTGRES_USER:-synapse_admin}
+      SEMAPHORE_DB_PASS: ${POSTGRES_PASSWORD:-synapse_dev_2026}
+      SEMAPHORE_DB: synapse_riskops
+      SEMAPHORE_ADMIN: ${SEMAPHORE_ADMIN:-admin}
+      SEMAPHORE_ADMIN_PASSWORD: ${SEMAPHORE_ADMIN_PASSWORD:-synapse_semaphore_2026}
+      SEMAPHORE_ADMIN_EMAIL: ${SEMAPHORE_ADMIN_EMAIL:-admin@synapse.local}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - semaphore_data:/var/lib/semaphore
+      - ./ansible/playbooks:/home/semaphore/playbooks:ro
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # Activepieces (Workflow & Notification Engine)
+  # ===================================================
+  activepieces:
+    image: activepieces/activepieces:latest
+    container_name: synapse-activepieces
+    restart: unless-stopped
+    ports:
+      - "${ACTIVEPIECES_PORT:-8888}:80"
+    environment:
+      AP_POSTGRES_DATABASE: activepieces
+      AP_POSTGRES_HOST: postgres
+      AP_POSTGRES_PORT: 5432
+      AP_POSTGRES_USERNAME: ${POSTGRES_USER:-synapse_admin}
+      AP_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapse_dev_2026}
+      AP_REDIS_HOST: redis
+      AP_REDIS_PORT: 6379
+      AP_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef"
+      AP_JWT_SECRET: ${AP_JWT_SECRET:-activepieces_jwt_secret_change_me_synapse_2026}
+      AP_FRONTEND_URL: "http://localhost:8888"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # Prometheus Metrics Collector
+  # ===================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: synapse-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # OpenTelemetry Collector (Traces, Metrics, Logs)
+  # ===================================================
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: synapse-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./docker/otel-collector/otel-collector-config.yml:/etc/otel-collector-config.yml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+      - "8889:8889" # Prometheus metrics exporter
+    networks:
+      - synapse-network
+
+  # ===================================================
+  # Alertmanager Alert Router
+  # ===================================================
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: synapse-alertmanager
+    restart: unless-stopped
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     networks:
       - synapse-network
 
@@ -178,6 +295,10 @@ volumes:
     driver: local
   n8n_data:
     driver: local
+  semaphore_data:
+    driver: local
+  prometheus_data:
+    driver: local
 
 # =====================================================
 # Networks
@@ -186,3 +307,5 @@ networks:
   synapse-network:
     driver: bridge
     name: synapse-riskops-network
+
+

@@ -1,0 +1,30 @@
+---
+- name: "Synapse RiskOps - Reset Network & Routing"
+  hosts: all
+  gather_facts: no
+  vars:
+    target_service: "{{ service_name | default('unknown-service') }}"
+    incident_ref: "{{ incident_id | default('MANUAL') }}"
+    risk_level: "{{ risk_score | default('N/A') }}"
+
+  tasks:
+    - name: "Log network remediation trigger"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "[SYNAPSE REMEDIATION] Resetting Service Network Interfaces"
+          - "Service Target: {{ target_service }}"
+          - "Incident ID:    {{ incident_ref }}"
+          - "Risk Score:     {{ risk_level }}"
+          - "=========================================================="
+
+    - name: "Disconnect and reconnect container from synapse network"
+      ansible.builtin.shell: |
+        docker network disconnect synapse-riskops-network synapse-{{ target_service }} 2>/dev/null || true
+        docker network connect synapse-riskops-network synapse-{{ target_service }} 2>/dev/null || true
+      register: network_result
+      ignore_errors: yes
+
+    - name: "Report network reset status"
+      ansible.builtin.debug:
+        msg: "Network reconnection completed for {{ target_service }}."

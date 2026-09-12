@@ -1,0 +1,19 @@
+groups:
+  - name: synapse_riskops
+    rules:
+      - alert: HighRiskScore
+        expr: synapse_risk_score > 0.85
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High risk score detected on {{ $labels.service }}"
+          description: "Risk score {{ $value }} exceeds threshold"
+
+      - alert: MLEngineDown
+        expr: up{job="synapse-ml-engine"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ML Engine is unreachable"

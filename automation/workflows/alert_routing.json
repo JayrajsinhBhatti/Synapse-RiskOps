@@ -1,3 +1,595 @@
 {
-  "_comment": "automation/workflows/alert_routing.json — Owner: Person 1, Week 5. n8n workflow: receives webhook from genai-agent's confidence_router.py, routes alerts to the correct channel/severity path based on risk score and routing_decision (auto_remediate vs escalate). Export the actual n8n workflow JSON here once built in the n8n editor."
+  "id": "6Y8xlFow5YGDR3pM",
+  "name": "Synapse - Alert Routing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alert",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-500, 0],
+      "id": "003b4dc6-a0ef-47cd-b9ad-32f0e31f4222",
+      "name": "Webhook",
+      "webhookId": "d4e2d1c5-6b27-4cb0-acee-40d24e6c022e"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body || $input.item.json;\nconst routing_decision = body.routing_decision || 'escalate';\nconst service_name = body.service_name || 'unknown-service';\nconst risk_score = Number(body.risk_score || 75.0);\nconst failure_type = body.predicted_failure_type || body.failure_type || 'service_crash';\nconst target_host = body.target_host || 'synapse-cluster';\nconst incident_id = body.incident_id || ('INC-' + Date.now());\nconst details = body.details || body.annotations || {};\n\nreturn {\n  json: {\n    incident_id,\n    service_name,\n    risk_score,\n    failure_type,\n    target_host,\n    routing_decision,\n    details,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-300, 0],
+      "id": "7a30e87b-7b0f-48d1-b5ea-10029f6da867",
+      "name": "Enrich & Normalize Alert"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c729baed-d5a1-4c4e-aee1-937fe75e06b2",
+              "leftValue": "={{ $json.routing_decision }}",
+              "rightValue": "auto_remediate",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-80, 0],
+      "id": "6a7125ee-c8f5-47da-90bb-c4d57b27589f",
+      "name": "Decision Router"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"alert_type\": \"auto_remediation\",\n  \"service_name\": \"{{ $json.service_name }}\",\n  \"risk_score\": {{ $json.risk_score }},\n  \"failure_type\": \"{{ $json.failure_type }}\",\n  \"target_host\": \"{{ $json.target_host }}\",\n  \"routing_decision\": \"auto_remediate\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [150, -140],
+      "id": "d11303e5-948d-4a43-a4ca-12758e93b298",
+      "name": "Prepare Auto-Remediation"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.failure_type }}",
+                    "rightValue": "memory_leak",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.failure_type }}",
+                    "rightValue": "service_crash",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.failure_type }}",
+                    "rightValue": "disk_exhaustion",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.failure_type }}",
+                    "rightValue": "network_degradation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": 4
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [380, -140],
+      "id": "e492bb1c-43f1-46ab-85b5-4b08709de720",
+      "name": "Switch Failure Type"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://semaphore:3000/api/project/1/tasks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer hegkfuqjxkcud_yz0fngh-1o6rrifhvqwl3yi9cvzje="
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"template_id\": 2,\n  \"environment\": \"{\\\"action\\\":\\\"scale_resources\\\",\\\"service_name\\\":\\\"{{ $json.service_name }}\\\",\\\"failure_type\\\":\\\"{{ $json.failure_type }}\\\",\\\"risk_score\\\":{{ $json.risk_score }},\\\"target_host\\\":\\\"{{ $json.target_host }}\\\",\\\"incident_id\\\":\\\"{{ $json.incident_id }}\\\"}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, -320],
+      "id": "1e712a80-e837-4d9c-bd62-cf05206385d0",
+      "name": "Remediate: Scale Resources",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://semaphore:3000/api/project/1/tasks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer hegkfuqjxkcud_yz0fngh-1o6rrifhvqwl3yi9cvzje="
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"template_id\": 1,\n  \"environment\": \"{\\\"action\\\":\\\"restart_service\\\",\\\"service_name\\\":\\\"{{ $json.service_name }}\\\",\\\"failure_type\\\":\\\"{{ $json.failure_type }}\\\",\\\"risk_score\\\":{{ $json.risk_score }},\\\"target_host\\\":\\\"{{ $json.target_host }}\\\",\\\"incident_id\\\":\\\"{{ $json.incident_id }}\\\"}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, -180],
+      "id": "2c6488d5-1c39-44c1-90a6-5827361a49ec",
+      "name": "Remediate: Restart Service",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://semaphore:3000/api/project/1/tasks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer hegkfuqjxkcud_yz0fngh-1o6rrifhvqwl3yi9cvzje="
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"template_id\": 3,\n  \"environment\": \"{\\\"action\\\":\\\"clear_disk\\\",\\\"service_name\\\":\\\"{{ $json.service_name }}\\\",\\\"failure_type\\\":\\\"{{ $json.failure_type }}\\\",\\\"risk_score\\\":{{ $json.risk_score }},\\\"target_host\\\":\\\"{{ $json.target_host }}\\\",\\\"incident_id\\\":\\\"{{ $json.incident_id }}\\\"}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, -40],
+      "id": "3b2909f1-7c91-4e43-8557-089c8942b039",
+      "name": "Remediate: Clear Disk",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://semaphore:3000/api/project/1/tasks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer hegkfuqjxkcud_yz0fngh-1o6rrifhvqwl3yi9cvzje="
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"template_id\": 4,\n  \"environment\": \"{\\\"action\\\":\\\"reset_network\\\",\\\"service_name\\\":\\\"{{ $json.service_name }}\\\",\\\"failure_type\\\":\\\"{{ $json.failure_type }}\\\",\\\"risk_score\\\":{{ $json.risk_score }},\\\"target_host\\\":\\\"{{ $json.target_host }}\\\",\\\"incident_id\\\":\\\"{{ $json.incident_id }}\\\"}\"\n}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 100],
+      "id": "4e7235a9-e314-411a-969c-097b6a489dc2",
+      "name": "Remediate: Reset Network",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const incoming = $input.item.json;\nconst prev = $('Prepare Auto-Remediation').first().json;\nconst isError = Boolean(incoming.error || incoming.status >= 400 || (incoming.statusCode && incoming.statusCode >= 400));\n\nif (isError) {\n  return {\n    json: {\n      incident_id: prev.incident_id,\n      service_name: prev.service_name,\n      risk_score: prev.risk_score,\n      failure_type: prev.failure_type,\n      target_host: prev.target_host,\n      routing_decision: 'escalate',\n      remediation_status: 'FAILED',\n      error_details: incoming.error || incoming.message || 'Remediation control plane execution failed',\n      timestamp: new Date().toISOString()\n    }\n  };\n}\n\nreturn {\n  json: {\n    incident_id: prev.incident_id,\n    service_name: prev.service_name,\n    risk_score: prev.risk_score,\n    failure_type: prev.failure_type,\n    target_host: prev.target_host,\n    routing_decision: 'auto_remediate',\n    remediation_status: 'SUCCESS',\n    execution_response: incoming,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [950, -100],
+      "id": "5f6908bc-8911-4091-a1e9-4e50882ef941",
+      "name": "Check Remediation Result"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d09b83b1-9bf3-469b-90f7-5e36440db7f5",
+              "leftValue": "={{ $json.remediation_status }}",
+              "rightValue": "FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1180, -100],
+      "id": "6d3809ef-4bf2-416e-bf27-1845bb0377a0",
+      "name": "Did Remediation Fail?"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service_name\": \"{{ $json.service_name }}\",\n  \"risk_score\": {{ $json.risk_score }},\n  \"failure_type\": \"{{ $json.failure_type }}\",\n  \"target_host\": \"{{ $json.target_host }}\",\n  \"routing_decision\": \"escalate\",\n  \"reason\": \"Remediation execution failed: {{ $json.error_details }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1400, -180],
+      "id": "7b2909df-2c39-4467-bc18-47209930f14d",
+      "name": "Prepare Remediation Fallback Escalation"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service_name\": \"{{ $json.service_name }}\",\n  \"risk_score\": {{ $json.risk_score }},\n  \"failure_type\": \"{{ $json.failure_type }}\",\n  \"target_host\": \"{{ $json.target_host }}\",\n  \"status\": \"REMEDIATED_AUTOMATICALLY\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1400, 20],
+      "id": "8a3909ef-4d19-482a-a926-29109039e14a",
+      "name": "Log Remediation Success"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service_name\": \"{{ $json.service_name }}\",\n  \"risk_score\": {{ $json.risk_score }},\n  \"failure_type\": \"{{ $json.failure_type }}\",\n  \"target_host\": \"{{ $json.target_host }}\",\n  \"routing_decision\": \"escalate\",\n  \"reason\": \"High risk anomaly detected without automated remediation policy\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [150, 180],
+      "id": "c23bd730-f739-4ee9-9e75-fb2d81664ded",
+      "name": "Prepare Escalation Alert"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0C0Z6P6D61",
+          "mode": "id"
+        },
+        "text": "=🚨 *Synapse RiskOps Alert — Escalation Required*\n\n*Incident ID:* `{{ $json.incident_id }}`\n*Service:* *{{ $json.service_name }}*\n*Risk Score:* `{{ $json.risk_score }}%`\n*Failure Type:* `{{ $json.failure_type }}`\n*Target Host:* `{{ $json.target_host }}`\n*Routing Decision:* `{{ $json.routing_decision }}`\n*Reason:* {{ $json.reason || 'Automated confidence routing threshold exceeded.' }}\n*Timestamp:* `{{ $json.timestamp }}`\n\n🔍 *Action Required:* On-call engineer investigation requested. Review diagnostics in dashboard.",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [1700, 40],
+      "id": "ce3ee147-02d7-4e06-983b-a2e902463dc9",
+      "name": "Send Slack Notification",
+      "credentials": {
+        "slackApi": {
+          "id": "Exqdjfo4iWCiQvrT",
+          "name": "Slack account"
+        }
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Enrich & Normalize Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich & Normalize Alert": {
+      "main": [
+        [
+          {
+            "node": "Decision Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision Router": {
+      "main": [
+        [
+          {
+            "node": "Prepare Auto-Remediation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Escalation Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Auto-Remediation": {
+      "main": [
+        [
+          {
+            "node": "Switch Failure Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Failure Type": {
+      "main": [
+        [
+          {
+            "node": "Remediate: Scale Resources",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Remediate: Restart Service",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Remediate: Clear Disk",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Remediate: Reset Network",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Escalation Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remediate: Scale Resources": {
+      "main": [
+        [
+          {
+            "node": "Check Remediation Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remediate: Restart Service": {
+      "main": [
+        [
+          {
+            "node": "Check Remediation Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remediate: Clear Disk": {
+      "main": [
+        [
+          {
+            "node": "Check Remediation Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remediate: Reset Network": {
+      "main": [
+        [
+          {
+            "node": "Check Remediation Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Remediation Result": {
+      "main": [
+        [
+          {
+            "node": "Did Remediation Fail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Did Remediation Fail?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Remediation Fallback Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Remediation Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Remediation Fallback Escalation": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Escalation Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "availableInMCP": true
+  }
 }
