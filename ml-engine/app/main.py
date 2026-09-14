@@ -19,7 +19,14 @@ from typing import Optional
 from app.core.config import settings
 from app.services.risk_engine import RiskEngine
 from app.services.csv_loader import CSVLoader
-from app.api import risk_score, ingest, graph_traversal
+from app.api import (
+    risk_score,
+    ingest,
+    graph_traversal,
+    runbook,
+    routing,
+    week4_pipeline,
+)
 from app.services.graph_builder import get_graph_builder
 
 
@@ -125,8 +132,9 @@ app.add_middleware(
 app.include_router(risk_score.router)
 app.include_router(ingest.router)
 app.include_router(graph_traversal.router)
-
-
+app.include_router(runbook.router)
+app.include_router(routing.router)
+app.include_router(week4_pipeline.router)
 # =====================================================
 # System Endpoints
 # =====================================================
@@ -164,5 +172,11 @@ async def root():
             "graph_traverse": "GET /api/graph/traverse?service={name}",
             "graph_topology": "GET /api/graph/topology",
             "graph_blast_radius": "GET /api/graph/blast-radius?service={name}",
+            "runbooks": "GET /api/runbooks?failure_type={type}&service={name}",
+            "runbook_execute": "POST /api/runbooks/execute",
+            "routing_decisions": "POST /api/routing/decisions",
+            "routing_history": "GET /api/routing/decisions?service={name}",
+            "week4_diagnosis": "POST /api/week4/analyze",
+            "week4_execute": "POST /api/week4/execute",
         },
     }
