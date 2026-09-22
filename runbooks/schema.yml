@@ -1,0 +1,87 @@
+# Synapse RiskOps — Runbook Schema
+# Validates runbook YAML definitions.
+# Each runbook defines a sequence of steps that map to
+# remediation executors (Docker SDK, Ansible, Kubernetes).
+
+type: object
+required: [name, description, failure_types, steps]
+
+properties:
+  name:
+    type: string
+    description: Human-readable runbook name
+
+  description:
+    type: string
+    description: What this runbook does and when to trigger it
+
+  failure_types:
+    type: array
+    items:
+      type: string
+    description: Failure types this runbook handles (e.g., memory_leak, service_crash)
+
+  severity:
+    type: string
+    enum: [low, medium, high, critical]
+    default: high
+
+  auto_trigger:
+    type: boolean
+    default: true
+    description: Whether this runbook can be triggered automatically
+
+  max_execution_time_seconds:
+    type: integer
+    default: 300
+
+  steps:
+    type: array
+    items:
+      type: object
+      required: [name, executor, action]
+      properties:
+        name:
+          type: string
+          description: Human-readable step name
+
+        executor:
+          type: string
+          enum: [docker, ansible, kubernetes, http, script]
+          description: Which remediation executor to use
+
+        action:
+          type: string
+          description: Action to perform (maps to executor method)
+
+        params:
+          type: object
+          description: Parameters for the action
+
+        timeout_seconds:
+          type: integer
+          default: 60
+
+        on_failure:
+          type: string
+          enum: [abort, continue, rollback, escalate]
+          default: escalate
+
+        condition:
+          type: string
+          description: Optional condition expression to evaluate before running
+
+  rollback_steps:
+    type: array
+    description: Steps to execute if the runbook fails and on_failure=rollback
+    items:
+      type: object
+      properties:
+        name:
+          type: string
+        executor:
+          type: string
+        action:
+          type: string
+        params:
+          type: object

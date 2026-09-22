@@ -1,0 +1,58 @@
+# =============================================================================
+# Runbook: Cascading Failure Remediation
+# =============================================================================
+
+name: Cascading Failure Remediation
+description: >
+  Handles cascading_failure by using NetworkX to identify the blast
+  radius, isolating the failing service, remediating the upstream
+  root cause, and validating downstream recovery.
+
+failure_types:
+  - cascading_failure
+
+severity: critical
+auto_trigger: false
+max_execution_time_seconds: 600
+
+steps:
+  - name: "Analyze blast radius via dependency graph"
+    executor: http
+    action: get
+    params:
+      url: "http://ml-engine:8000/api/graph/cascade-simulation"
+      query_param: "failing_service"
+    timeout_seconds: 15
+    on_failure: continue
+
+  - name: "Identify common root cause via PageRank"
+    executor: http
+    action: get
+    params:
+      url: "http://ml-engine:8000/api/graph/root-cause-analysis"
+      query_param: "services"
+    timeout_seconds: 15
+    on_failure: continue
+
+  - name: "Restart the root cause service"
+    executor: docker
+    action: restart_container
+    params:
+      timeout: 30
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Wait for propagation recovery"
+    executor: script
+    action: sleep
+    params:
+      seconds: 30
+    timeout_seconds: 35
+    on_failure: continue
+
+  - name: "Validate all downstream services"
+    executor: ansible
+    action: health_check
+    params: {}
+    timeout_seconds: 120
+    on_failure: escalate

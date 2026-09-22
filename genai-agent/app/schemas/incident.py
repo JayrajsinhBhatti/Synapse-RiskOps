@@ -83,3 +83,6 @@ class DiagnoseResponse(BaseModel):
     # Routing decision
     routing_decision: str = "escalate"   # "auto_remediate" | "escalate"
     routing_reason: str = ""
+
+    # Remediation result (populated when routing_decision == "auto_remediate")
+    remediation_result: Optional[Dict[str, Any]] = None

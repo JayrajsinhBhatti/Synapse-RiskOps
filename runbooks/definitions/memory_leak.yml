@@ -1,0 +1,84 @@
+# =============================================================================
+# Runbook: Memory Leak Remediation
+# =============================================================================
+# Triggered when: memory_leak failure type is detected
+# Flow: Identify leaking service → check GC metrics → scale memory →
+#       restart if needed → verify health
+# =============================================================================
+
+name: Memory Leak Remediation
+description: >
+  Handles memory_leak failures by progressively scaling resources,
+  restarting the service, and verifying recovery. If the leak persists
+  after remediation, escalates to an on-call engineer.
+
+failure_types:
+  - memory_leak
+  - gc_pressure
+
+severity: high
+auto_trigger: true
+max_execution_time_seconds: 300
+
+steps:
+  - name: "Inspect container health before remediation"
+    executor: docker
+    action: inspect_health
+    params:
+      container_prefix: "synapse-"
+    timeout_seconds: 10
+    on_failure: continue
+
+  - name: "Capture pre-remediation logs"
+    executor: docker
+    action: get_logs
+    params:
+      tail: 200
+    timeout_seconds: 15
+    on_failure: continue
+
+  - name: "Scale container memory limit to 2GB"
+    executor: docker
+    action: update_resources
+    params:
+      mem_limit: "2g"
+    timeout_seconds: 30
+    on_failure: continue
+
+  - name: "Restart the leaking service"
+    executor: docker
+    action: restart_container
+    params:
+      timeout: 30
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Wait for service to stabilize"
+    executor: script
+    action: sleep
+    params:
+      seconds: 15
+    timeout_seconds: 20
+    on_failure: continue
+
+  - name: "Run post-remediation health check"
+    executor: ansible
+    action: health_check
+    params: {}
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Verify container health is restored"
+    executor: docker
+    action: inspect_health
+    params:
+      container_prefix: "synapse-"
+    timeout_seconds: 10
+    on_failure: escalate
+
+rollback_steps:
+  - name: "Revert memory limit"
+    executor: docker
+    action: update_resources
+    params:
+      mem_limit: "1g"

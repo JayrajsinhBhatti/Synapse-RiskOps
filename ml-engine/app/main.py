@@ -19,7 +19,7 @@ from typing import Optional
 from app.core.config import settings
 from app.services.risk_engine import RiskEngine
 from app.services.csv_loader import CSVLoader
-from app.api import risk_score, ingest, graph_traversal
+from app.api import risk_score, ingest, graph_traversal, graph_analysis
 from app.services.graph_builder import get_graph_builder
 
 
@@ -92,14 +92,22 @@ app = FastAPI(
     title="Synapse RiskOps - ML Engine",
     description=(
         "Anomaly detection (Isolation Forest), failure prediction (Statsmodels), "
-        "composite risk scoring, and dependency graph APIs for the "
+        "composite risk scoring, dependency graph APIs, and advanced graph "
+        "analysis (PageRank, centrality, cascade simulation) for the "
         "Synapse RiskOps autonomous risk operations pipeline."
     ),
-    version="0.3.0",
+    version="0.4.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+# Initialize OpenTelemetry
+try:
+    from app.telemetry import init_telemetry
+    init_telemetry(app)
+except Exception as exc:
+    logger.warning(f"OpenTelemetry init failed (non-fatal): {exc}")
 
 # =====================================================
 # CORS Middleware
@@ -125,6 +133,7 @@ app.add_middleware(
 app.include_router(risk_score.router)
 app.include_router(ingest.router)
 app.include_router(graph_traversal.router)
+app.include_router(graph_analysis.router)
 
 
 # =====================================================
@@ -142,7 +151,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "ml-engine",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "models_ready": models_ready,
     }
 
@@ -152,7 +161,7 @@ async def root():
     """Root endpoint with service information."""
     return {
         "service": "Synapse RiskOps - ML Engine",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "docs": "/docs",
         "health": "/health",
         "endpoints": {
@@ -164,5 +173,8 @@ async def root():
             "graph_traverse": "GET /api/graph/traverse?service={name}",
             "graph_topology": "GET /api/graph/topology",
             "graph_blast_radius": "GET /api/graph/blast-radius?service={name}",
+            "graph_root_cause": "GET /api/graph/root-cause-analysis?services={names}",
+            "graph_critical_paths": "GET /api/graph/critical-paths",
+            "graph_cascade_sim": "GET /api/graph/cascade-simulation?failing_service={name}",
         },
     }

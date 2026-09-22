@@ -1,0 +1,64 @@
+# =============================================================================
+# Runbook: Database Overload Remediation
+# =============================================================================
+
+name: Database Overload Remediation
+description: >
+  Handles database overload scenarios by checking connection pools,
+  killing long-running queries, and failing over to replica if needed.
+
+failure_types:
+  - database_overload
+  - connection_pool_exhaustion
+
+severity: critical
+auto_trigger: false
+max_execution_time_seconds: 300
+
+steps:
+  - name: "Inspect database container health"
+    executor: docker
+    action: inspect_health
+    params:
+      container_prefix: "synapse-"
+    timeout_seconds: 10
+    on_failure: continue
+
+  - name: "Capture database logs"
+    executor: docker
+    action: get_logs
+    params:
+      tail: 200
+    timeout_seconds: 15
+    on_failure: continue
+
+  - name: "Restart database service"
+    executor: docker
+    action: restart_container
+    params:
+      timeout: 60
+    timeout_seconds: 90
+    on_failure: escalate
+
+  - name: "Wait for database to accept connections"
+    executor: script
+    action: sleep
+    params:
+      seconds: 20
+    timeout_seconds: 25
+    on_failure: continue
+
+  - name: "Validate database health"
+    executor: ansible
+    action: health_check
+    params: {}
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Restart dependent services"
+    executor: docker
+    action: restart_container
+    params:
+      timeout: 30
+    timeout_seconds: 60
+    on_failure: escalate

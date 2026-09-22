@@ -1,0 +1,38 @@
+# =============================================================================
+# Runbook: Network Degradation Remediation
+# =============================================================================
+
+name: Network Degradation Remediation
+description: >
+  Handles network_degradation by resetting Docker network
+  interfaces and verifying connectivity.
+
+failure_types:
+  - network_degradation
+
+severity: high
+auto_trigger: true
+max_execution_time_seconds: 180
+
+steps:
+  - name: "Disconnect and reconnect container network"
+    executor: docker
+    action: fix_network
+    params:
+      network_name: "synapse-riskops-network"
+    timeout_seconds: 30
+    on_failure: continue
+
+  - name: "Reset network via Ansible playbook"
+    executor: ansible
+    action: reset_network
+    params: {}
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Verify connectivity restored"
+    executor: ansible
+    action: health_check
+    params: {}
+    timeout_seconds: 30
+    on_failure: escalate

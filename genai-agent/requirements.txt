@@ -11,3 +11,18 @@ requests>=2.32.0,<3.0.0
 httpx>=0.27.0,<1.0.0
 loguru>=0.7.0,<1.0.0
 python-dotenv>=1.0.0,<2.0.0
+
+# ----- Remediation: Docker SDK -----
+docker>=7.0.0,<8.0.0
+
+# ----- Remediation: Kubernetes -----
+kubernetes>=29.0.0,<31.0.0
+
+# ----- Observability: OpenTelemetry -----
+opentelemetry-api>=1.25.0,<2.0.0
+opentelemetry-sdk>=1.25.0,<2.0.0
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-exporter-otlp-proto-grpc>=1.25.0,<2.0.0
+
+# ----- Runbook Engine -----
+pyyaml>=6.0.0,<7.0.0
