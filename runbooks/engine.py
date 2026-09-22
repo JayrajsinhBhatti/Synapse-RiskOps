@@ -472,20 +472,22 @@ def get_runbook_engine() -> RunbookEngine:
 # CLI entrypoint
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     engine = RunbookEngine()
 
     if "--validate" in sys.argv:
         errors = engine.validate()
         if errors:
-            print(f"\n❌ Validation found {len(errors)} error(s):")
+            print(f"\n[ERROR] Validation found {len(errors)} error(s):")
             for err in errors:
                 print(f"  - {err['file']}: {err['error']}")
             sys.exit(1)
         else:
-            print(f"\n✅ All runbooks valid ({len(engine.list_runbooks())} loaded)")
+            print(f"\n[OK] All runbooks valid ({len(engine.list_runbooks())} loaded)")
             sys.exit(0)
 
-    print("\n📋 Loaded Runbooks:")
+    print("\nLoaded Runbooks:")
     for rb in engine.list_runbooks():
         print(f"  [{rb['severity'].upper():8s}] {rb['name']}")
         print(f"             Triggers: {', '.join(rb['failure_types'])}")

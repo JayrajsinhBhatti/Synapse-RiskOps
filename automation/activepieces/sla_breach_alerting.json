@@ -1,0 +1,38 @@
+{
+  "name": "Synapse - SLA Breach Alerting",
+  "description": "Monitors open unresolved incident tickets against defined SLA thresholds (e.g. P1 < 15m, P2 < 60m). Escalates directly to incident commander if SLA is at risk.",
+  "trigger": {
+    "type": "SCHEDULE",
+    "settings": {
+      "cronExpression": "*/5 * * * *"
+    }
+  },
+  "actions": [
+    {
+      "name": "Fetch Open Incidents From DB",
+      "type": "HTTP",
+      "settings": {
+        "method": "GET",
+        "url": "http://genai-agent:8001/incidents/open",
+        "headers": {
+          "Accept": "application/json"
+        }
+      }
+    },
+    {
+      "name": "Detect At-Risk Incidents",
+      "type": "CODE",
+      "settings": {
+        "code": "exports.code = async (inputs) => {\n  const incidents = inputs.open_incidents || [];\n  const now = Date.now();\n  const atRisk = [];\n  for (const inc of incidents) {\n    const ageMinutes = (now - new Date(inc.created_at).getTime()) / 60000;\n    if (inc.severity === 'CRITICAL' && ageMinutes > 15) {\n      atRisk.push({ ...inc, ageMinutes: Math.round(ageMinutes), slaLimit: 15 });\n    } else if (inc.severity === 'HIGH' && ageMinutes > 60) {\n      atRisk.push({ ...inc, ageMinutes: Math.round(ageMinutes), slaLimit: 60 });\n    }\n  }\n  return { breaches: atRisk };\n};"
+      }
+    },
+    {
+      "name": "Alert Incident Commander",
+      "type": "SLACK_SEND_MESSAGE",
+      "settings": {
+        "channel": "#synapse-leads",
+        "text": ":warning: *SLA BREACH ALERT*: {{step_2.breaches.length}} incident(s) exceed resolution targets!\\n{{step_2.breaches.map(b => `• ${b.service_name} (${b.severity}) - Open for ${b.ageMinutes}m (Target: ${b.slaLimit}m)`).join('\\n')}}"
+      }
+    }
+  ]
+}

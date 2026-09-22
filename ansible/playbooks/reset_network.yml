@@ -6,6 +6,7 @@
     target_service: "{{ service_name | default('unknown-service') }}"
     incident_ref: "{{ incident_id | default('MANUAL') }}"
     risk_level: "{{ risk_score | default('N/A') }}"
+    network_name: "{{ target_network | default('synapse-riskops-network') }}"
 
   tasks:
     - name: "Log network remediation trigger"
@@ -16,15 +17,33 @@
           - "Service Target: {{ target_service }}"
           - "Incident ID:    {{ incident_ref }}"
           - "Risk Score:     {{ risk_level }}"
+          - "Network:        {{ network_name }}"
           - "=========================================================="
 
-    - name: "Disconnect and reconnect container from synapse network"
-      ansible.builtin.shell: |
-        docker network disconnect synapse-riskops-network synapse-{{ target_service }} 2>/dev/null || true
-        docker network connect synapse-riskops-network synapse-{{ target_service }} 2>/dev/null || true
-      register: network_result
+    - name: "Disconnect container from network"
+      ansible.builtin.command:
+        cmd: "docker network disconnect {{ network_name }} synapse-{{ target_service }}"
+      register: disconnect_result
+      changed_when: disconnect_result.rc == 0
+      failed_when: disconnect_result.rc != 0 and 'is not connected' not in (disconnect_result.stderr | default(''))
+      ignore_errors: yes
+
+    - name: "Reconnect container to network"
+      ansible.builtin.command:
+        cmd: "docker network connect {{ network_name }} synapse-{{ target_service }}"
+      register: connect_result
+      changed_when: connect_result.rc == 0
+      failed_when: connect_result.rc != 0 and 'already exists' not in (connect_result.stderr | default(''))
+      ignore_errors: yes
+
+    - name: "Post-remediation validation: verify network connectivity"
+      ansible.builtin.command:
+        cmd: "docker inspect --format '{%raw%}{{range $net,$v := .NetworkSettings.Networks}}{{$net}} {{end}}{%endraw%}' synapse-{{ target_service }}"
+      register: inspect_networks
+      changed_when: false
+      failed_when: false
       ignore_errors: yes
 
     - name: "Report network reset status"
       ansible.builtin.debug:
-        msg: "Network reconnection completed for {{ target_service }}."
+        msg: "Network reconnection completed for {{ target_service }}. Connected networks: {{ inspect_networks.stdout | default('NONE') }}"

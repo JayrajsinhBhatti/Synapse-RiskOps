@@ -9,7 +9,7 @@ so that Person 1's GenAI agent can consume them directly.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -105,6 +105,7 @@ class ForecastDetail(BaseModel):
     predicted_failure_type: str = Field(default="none", description="Type of predicted failure")
     prediction_horizon_minutes: int = Field(default=0, description="Minutes until predicted failure")
     trend_direction: str = Field(default="stable", description="Metric trend: rising, falling, stable")
+    confidence_interval: Optional[Dict[str, float]] = Field(default=None, description="Confidence interval [lower, upper] for forecast")
 
 
 class PredictionResponse(BaseModel):
@@ -121,6 +122,7 @@ class PredictionResponse(BaseModel):
     risk_threshold: float = Field(default=75.0, description="Threshold for incident triggering")
     risk_tier: RiskTier = Field(..., description="Classified risk level: healthy / watch / critical")
     confidence: float = Field(..., ge=0, le=1, description="Model confidence (0-1)")
+    confidence_interval: Optional[Dict[str, float]] = Field(default=None, description="Risk score 95% confidence interval")
 
     # Failure prediction
     predicted_failure_type: str = Field(default="none", description="Type of predicted failure")

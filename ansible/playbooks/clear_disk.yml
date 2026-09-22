@@ -22,8 +22,20 @@
       ansible.builtin.command:
         cmd: "docker image prune -f"
       register: prune_result
+      changed_when: "'Total reclaimed space: 0B' not in (prune_result.stdout | default(''))"
+      failed_when: prune_result.rc != 0
+      ignore_errors: yes
+
+    - name: "Post-remediation validation: check system disk usage"
+      ansible.builtin.command:
+        cmd: "docker system df"
+      register: docker_df_result
+      changed_when: false
+      failed_when: false
       ignore_errors: yes
 
     - name: "Report disk cleanup status"
       ansible.builtin.debug:
-        msg: "Disk prune task completed successfully."
+        msg:
+          - "Disk prune task completed successfully."
+          - "{{ docker_df_result.stdout_lines | default(['N/A']) }}"

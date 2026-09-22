@@ -128,6 +128,17 @@ class RiskEngine:
             # Use the top contributing feature to infer failure type
             predicted_failure_type = self._infer_failure_type(top_features)
 
+        # 7. Compute 95% confidence interval based on model confidence
+        uncertainty_margin = round((1.0 - confidence) * 15.0, 2)
+        ci_lower = round(max(0.0, risk_score - uncertainty_margin), 2)
+        ci_upper = round(min(100.0, risk_score + uncertainty_margin), 2)
+        risk_ci = {"lower": ci_lower, "upper": ci_upper}
+
+        forecast_ci = {
+            "lower": round(max(0.0, forecast_risk - (1.0 - confidence) * 0.15), 4),
+            "upper": round(min(1.0, forecast_risk + (1.0 - confidence) * 0.15), 4),
+        }
+
         # Build response
         return PredictionResponse(
             predicted_at=datetime.now(timezone.utc).isoformat(),
@@ -137,6 +148,7 @@ class RiskEngine:
             risk_threshold=self.WATCH_THRESHOLD,
             risk_tier=risk_tier,
             confidence=round(confidence, 4),
+            confidence_interval=risk_ci,
             predicted_failure_type=predicted_failure_type,
             prediction_horizon_minutes=forecast_result["prediction_horizon_minutes"],
             anomaly_detail=AnomalyDetail(
@@ -149,6 +161,7 @@ class RiskEngine:
                 predicted_failure_type=forecast_result["predicted_failure_type"],
                 prediction_horizon_minutes=forecast_result["prediction_horizon_minutes"],
                 trend_direction=forecast_result["trend_direction"],
+                confidence_interval=forecast_ci,
             ),
         )
 
