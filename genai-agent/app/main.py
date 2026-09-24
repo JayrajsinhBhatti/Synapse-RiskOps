@@ -19,6 +19,7 @@ from loguru import logger
 
 from app.schemas.incident import DiagnoseRequest, DiagnoseResponse
 from app.graph.state_graph import pipeline
+from app.chatbot.router import router as chatbot_router
 
 
 app = FastAPI(
@@ -47,6 +48,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(chatbot_router)
 
 N8N_WEBHOOK_URL = os.getenv(
     "N8N_WEBHOOK_URL",
