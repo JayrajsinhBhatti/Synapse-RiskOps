@@ -1,71 +1,45 @@
 /**
- * Synapse RiskOps - Root Application Component
- * ==============================================
- * Phase 1 placeholder. Full routing, auth context,
- * and React Query provider will be added in Phase 11.
+ * frontend/src/App.jsx
+ * Owner: Person 2 | Week: 6
+ * 
+ * Root Application Component.
+ * Configures TanStack React Query, AuthProvider, ChatbotProvider,
+ * and mounts the Cyber-Ops DashboardLayout and DashboardPage.
  */
-import ChatWidget from './components/chatbot/ChatWidget';
 
-function App() {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <ChatWidget />
-      <div className="glass-card p-12 text-center max-w-lg">
-        {/* Logo / Brand */}
-        <div className="mb-6">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-synapse-500 to-synapse-700 flex items-center justify-center mb-4 shadow-lg shadow-synapse-500/25">
-            <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <h1 className="text-3xl font-bold gradient-text">
-            Synapse RiskOps
-          </h1>
-        </div>
+import React, { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider } from './context/AuthContext';
+import { ChatbotProvider } from './context/ChatbotContext';
+import DashboardLayout from './layouts/DashboardLayout';
+import DashboardPage from './pages/DashboardPage';
 
-        {/* Status */}
-        <p className="text-gray-400 text-sm mb-6">
-          Autonomous AI-Powered Risk Operations Pipeline
-        </p>
+// Configure React Query client with resilient defaults
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 15, // 15 seconds
+      refetchOnWindowFocus: false,
+      retry: 2,
+    },
+  },
+});
 
-        {/* Health Indicators */}
-        <div className="space-y-3">
-          <StatusRow label="Frontend" status="online" />
-          <StatusRow label="Backend" status="pending" />
-          <StatusRow label="ML Engine" status="pending" />
-          <StatusRow label="Database" status="pending" />
-        </div>
-
-        <p className="text-gray-500 text-xs mt-8">
-          Phase 1 — Project Setup Complete
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/**
- * StatusRow Component
- * Shows the health status of each service.
- */
-function StatusRow({ label, status }) {
-  const statusConfig = {
-    online:  { color: 'bg-emerald-500', text: 'Online',  textColor: 'text-emerald-400' },
-    pending: { color: 'bg-amber-500',   text: 'Pending', textColor: 'text-amber-400'   },
-    offline: { color: 'bg-red-500',     text: 'Offline', textColor: 'text-red-400'     },
-  };
-
-  const config = statusConfig[status] || statusConfig.pending;
+export default function App() {
+  const [activeView, setActiveView] = useState('command-center');
 
   return (
-    <div className="flex items-center justify-between py-2 px-4 rounded-lg bg-white/5">
-      <span className="text-gray-300 text-sm font-medium">{label}</span>
-      <div className="flex items-center gap-2">
-        <div className={`w-2 h-2 rounded-full ${config.color} ${status === 'online' ? 'animate-pulse' : ''}`} />
-        <span className={`text-xs font-medium ${config.textColor}`}>{config.text}</span>
-      </div>
-    </div>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <ChatbotProvider>
+          <DashboardLayout
+            activeView={activeView}
+            onViewChange={setActiveView}
+          >
+            <DashboardPage activeView={activeView} />
+          </DashboardLayout>
+        </ChatbotProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }
-
-export default App;
