@@ -1,0 +1,56 @@
+# =============================================================================
+# Synapse RiskOps - RBAC for K8s Self-Healing Operator
+# =============================================================================
+# Grants the genai-agent ServiceAccount permissions to manage
+# pods, deployments, and HPAs for autonomous remediation.
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: synapse-healer
+  namespace: synapse
+  labels:
+    app: synapse-riskops
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: synapse-healer-role
+rules:
+  # Pod management (restart, delete, list)
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch", "delete"]
+  # Deployment management (scale, rollback)
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale", "replicasets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # HPA management (scale adjustments)
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Node operations (cordon/drain)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch"]
+  # Events (for observability)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: synapse-healer-binding
+subjects:
+  - kind: ServiceAccount
+    name: synapse-healer
+    namespace: synapse
+roleRef:
+  kind: ClusterRole
+  name: synapse-healer-role
+  apiGroup: rbac.authorization.k8s.io

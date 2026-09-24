@@ -1,0 +1,404 @@
+# Synapse RiskOps — Full Tool Integration Implementation Plan
+
+## Project Overview
+
+Synapse RiskOps is an **autonomous incident operations platform** that detects server/website overloads and errors, diagnoses root causes via a GenAI-powered LangGraph pipeline, and either auto-remediates or escalates to engineers with a generated ticket. This plan covers integrating all requested tools into a production-ready, verifiable system.
+
+---
+
+## Current State Analysis
+
+### ✅ What's Already Connected & Working
+
+| Tool | Status | Where |
+|------|--------|-------|
+| **Prometheus** | ✅ Config exists, scrapes 3 targets | [prometheus.yml](file:///e:/Users/Jayraj/synapse-riskops/docker/prometheus/prometheus.yml) |
+| **Alertmanager** | ✅ Config exists, routes to n8n webhook | [alertmanager.yml](file:///e:/Users/Jayraj/synapse-riskops/docker/alertmanager/alertmanager.yml) |
+| **Ansible (via Semaphore)** | ✅ 4 playbooks exist (restart, scale, disk, network) | [playbooks/](file:///e:/Users/Jayraj/synapse-riskops/ansible/playbooks) |
+| **n8n** | ✅ Alert routing workflow + Prometheus ingest workflow | [alert_routing.json](file:///e:/Users/Jayraj/synapse-riskops/automation/workflows/alert_routing.json) |
+| **NetworkX** | ✅ Full graph builder with root cause ranking | [graph_builder.py](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/app/services/graph_builder.py) |
+| **OpenTelemetry Collector** | ⚠️ Config exists but **no app instrumentation** | [otel-collector-config.yml](file:///e:/Users/Jayraj/synapse-riskops/docker/otel-collector/otel-collector-config.yml) |
+| **Activepieces** | ⚠️ Docker service defined but **no workflows created** | [docker-compose.yml L215-236](file:///e:/Users/Jayraj/synapse-riskops/docker-compose.yml#L215-L236) |
+| **LangGraph Pipeline** | ✅ 5-node pipeline working | [state_graph.py](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/app/graph/state_graph.py) |
+| **Slack** | ✅ Notification via n8n workflow | Part of alert_routing.json |
+
+### ❌ Not Yet Connected (Needs Implementation)
+
+| Tool | Gap |
+|------|-----|
+| **Kubernetes** | No K8s manifests, no K8s auto-healing logic |
+| **Docker SDK (Python)** | No programmatic container fix logic — Ansible uses CLI `docker` commands only |
+| **OpenTelemetry (App Instrumentation)** | Collector exists but genai-agent and ml-engine don't emit traces/spans |
+| **Activepieces (Workflows)** | Container runs but zero automation flows created |
+| **Runbooks** | No runbook definitions — remediation logic is ad-hoc inside Ansible playbooks |
+| **Prometheus (CPU/Memory Tracking)** | Alert rules are minimal (2 rules only) — needs Netflix-style resource tracking |
+| **Alertmanager (Advanced Routing)** | Only 1 route — needs severity-based multi-receiver routing + silencing |
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Kubernetes Scope**: Should we deploy the entire Synapse stack to K8s (Helm chart), or just add a Kubernetes self-healing module that connects to an existing cluster? For this plan I'm assuming we create K8s manifests + a Python k8s operator service that auto-fixes pods.
+
+> [!IMPORTANT]
+> **"StackModel and Prothex"**: I'm interpreting these as **Statsmodels** (already used in [risk_engine.py](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/app/services/risk_engine.py) for failure forecasting) and **Prometheus** (already configured). Please confirm if you meant different tools.
+
+> [!WARNING]
+> **Activepieces vs n8n**: You currently have both n8n AND Activepieces in docker-compose. n8n handles all automation today. Should Activepieces replace n8n, or complement it for specific workflows (e.g., ticketing, notifications)?
+
+---
+
+## Proposed Changes
+
+### Phase 1 — Ansible Remediation Engine (Server Fixes)
+
+> Currently: 4 basic playbooks exist that use raw `docker` CLI commands. They're triggered by n8n → Semaphore API.
+
+#### [NEW] `genai-agent/app/remediation/ansible_executor.py`
+- Python module that directly calls Semaphore REST API to trigger playbooks programmatically
+- Maps failure types to playbook template IDs
+- Tracks execution status and returns success/failure to the LangGraph pipeline
+- Adds a new `remediation_node` to the LangGraph StateGraph so remediation is **in-pipeline**, not just via n8n
+
+#### [MODIFY] [state_graph.py](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/app/graph/state_graph.py)
+- Add `remediation_node` after `confidence_router` — if routing_decision = `auto_remediate`, execute the Ansible playbook directly; otherwise skip to END
+
+#### [NEW] `ansible/playbooks/health_check.yml`
+- Post-remediation health check playbook that validates the fix worked (curls health endpoint, checks container status)
+
+#### [MODIFY] `ansible/playbooks/restart_service.yml`, `scale_resources.yml`, `clear_disk.yml`, `reset_network.yml`
+- Add post-remediation validation tasks (health check curl)
+- Add proper `changed_when` and `failed_when` conditions for idempotency
+
+**Verification**: Run `ansible-playbook --check` dry-run on all playbooks. Trigger via Semaphore API and confirm execution log.
+
+---
+
+### Phase 2 — Prometheus & Alertmanager (Netflix-Style CPU/Resource Tracking)
+
+> Currently: 2 alert rules only (HighRiskScore + MLEngineDown). No CPU/memory/disk/network rules.
+
+#### [MODIFY] [riskops_alerts.yml](file:///e:/Users/Jayraj/synapse-riskops/docker/prometheus/rules/riskops_alerts.yml)
+- Add **15+ alert rules** covering Netflix-style resource monitoring:
+  - `HighCpuUsage` — container CPU > 80% for 3m
+  - `HighMemoryUsage` — container memory > 85% for 3m
+  - `DiskSpaceLow` — disk usage > 90%
+  - `HighErrorRate` — HTTP 5xx rate > 5% for 2m
+  - `HighLatencyP99` — p99 response time > 2s
+  - `ContainerRestarting` — restart count > 3 in 15m
+  - `ServiceDown` — target down for 1m
+  - `HighNetworkLatency` — network latency > 500ms
+  - `ConnectionPoolExhausted` — active connections > 90% capacity
+  - `GCPauseHigh` — GC pause > 500ms
+  - `RequestSpikeDetected` — request rate > 2x baseline
+  - `ThreadPoolExhausted` — thread count near limit
+  - `ErrorRateSpike` — sudden error rate increase
+
+#### [MODIFY] [prometheus.yml](file:///e:/Users/Jayraj/synapse-riskops/docker/prometheus/prometheus.yml)
+- Add scrape targets for all containers via cAdvisor
+- Add node-exporter job for host-level metrics
+- Add OTel collector metrics endpoint scrape
+
+#### [NEW] `docker-compose.yml` — add `cadvisor` and `node-exporter` services
+- **cAdvisor**: Exposes per-container CPU, memory, network, disk I/O metrics
+- **node-exporter**: Exposes host-level system metrics
+
+#### [MODIFY] [alertmanager.yml](file:///e:/Users/Jayraj/synapse-riskops/docker/alertmanager/alertmanager.yml)
+- Add severity-based routing (critical → auto-remediate via n8n, warning → Slack-only, info → log-only)
+- Add inhibition rules (critical suppresses warning for same service)
+- Add `genai-agent-webhook` receiver that sends alerts directly to the GenAI agent `/diagnose` endpoint
+- Add silencing templates for maintenance windows
+
+**Verification**: `docker compose up prometheus alertmanager cadvisor node-exporter` → visit `localhost:9090/alerts` to see all rules loaded. Trigger a test alert and confirm routing through Alertmanager → n8n → Slack.
+
+---
+
+### Phase 3 — Kubernetes Self-Healing
+
+> Currently: No Kubernetes integration. All services run via docker-compose.
+
+#### [NEW] `kubernetes/` directory
+- `namespace.yml` — Synapse namespace
+- `deployments/` — K8s Deployment manifests for each service (genai-agent, ml-engine, backend, frontend)
+- `services/` — ClusterIP/NodePort Service manifests
+- `hpa/` — HorizontalPodAutoscaler for auto-scaling based on CPU/memory
+- `configmaps/` — Prometheus, Alertmanager, OTel configs as ConfigMaps
+- `rbac/` — ServiceAccount + ClusterRole for the self-healing operator
+
+#### [NEW] `genai-agent/app/remediation/k8s_healer.py`
+- Uses `kubernetes` Python client library
+- Capabilities:
+  - **Pod restart**: Delete crashing/OOMKilled pods (auto-recreated by Deployment)
+  - **Scale up**: Patch HPA or Deployment replicas when load spikes
+  - **Scale down**: Reduce replicas when load normalizes
+  - **Rollback**: Roll back to previous deployment revision on CrashLoopBackOff
+  - **Drain node**: Cordon and drain a problematic node
+- Integrates with the LangGraph remediation_node
+
+#### [MODIFY] [state_graph.py](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/app/graph/state_graph.py)
+- Remediation node selects between Ansible (Docker) and K8s healer based on infrastructure_type in request
+
+**Verification**: Deploy to a local Minikube/Kind cluster. Simulate a CrashLoopBackOff pod → confirm auto-restart. Simulate high CPU → confirm HPA scale-up.
+
+---
+
+### Phase 4 — OpenTelemetry Instrumentation (Distributed Tracing)
+
+> Currently: OTel Collector is deployed but no application emits traces.
+
+#### [MODIFY] [requirements.txt (genai-agent)](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/requirements.txt)
+- Add: `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-instrumentation-fastapi`, `opentelemetry-exporter-otlp`
+
+#### [MODIFY] [requirements.txt (ml-engine)](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/requirements.txt)
+- Add: `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-instrumentation-fastapi`, `opentelemetry-exporter-otlp`
+
+#### [NEW] `genai-agent/app/telemetry.py`
+- Configure OpenTelemetry TracerProvider with OTLP exporter pointing to `otel-collector:4317`
+- Auto-instrument FastAPI
+- Add custom spans for each LangGraph pipeline node (ml_node, log_analyzer, root_cause_identifier, etc.)
+- Attach trace_id + span_id to every log message
+
+#### [NEW] `ml-engine/app/telemetry.py`
+- Same OTLP setup for ml-engine
+- Custom spans for risk scoring, graph traversal, anomaly detection
+
+#### [MODIFY] [main.py (genai-agent)](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/app/main.py)
+- Import and initialize telemetry on startup
+
+#### [MODIFY] [main.py (ml-engine)](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/app/main.py)
+- Import and initialize telemetry on startup
+
+#### [MODIFY] [otel-collector-config.yml](file:///e:/Users/Jayraj/synapse-riskops/docker/otel-collector/otel-collector-config.yml)
+- Add Jaeger exporter for trace visualization
+- Add log exporter for structured log collection
+- Add service name and resource attributes
+
+#### [NEW] Add **Jaeger** service to `docker-compose.yml`
+- Trace visualization UI at `localhost:16686`
+- Receives traces from OTel Collector
+
+**Verification**: Send a `/diagnose` request → open Jaeger UI → see the full distributed trace across genai-agent → ml-engine with all 5 pipeline node spans.
+
+---
+
+### Phase 5 — Docker SDK (Programmatic Container Fixes)
+
+> Currently: Ansible playbooks shell out to `docker restart`, `docker update`, etc. No programmatic Python integration.
+
+#### [NEW] `genai-agent/app/remediation/docker_healer.py`
+- Uses `docker` Python SDK (`pip install docker`)
+- Capabilities:
+  - **Restart container**: `client.containers.get(name).restart()`
+  - **Update resources**: `container.update(mem_limit=..., cpu_quota=...)`
+  - **Read logs**: `container.logs(tail=100)` for post-incident analysis
+  - **Health inspection**: `container.attrs['State']['Health']`
+  - **Prune**: `client.containers.prune()`, `client.images.prune()`, `client.volumes.prune()`
+  - **Network fix**: Disconnect/reconnect container to network
+- Returns structured remediation result (success/failure, duration, container state after)
+
+#### [MODIFY] [requirements.txt (genai-agent)](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/requirements.txt)
+- Add: `docker>=7.0.0`
+
+#### [MODIFY] Remediation node in state_graph
+- Priority: Docker SDK for fast container-level fixes → Ansible for complex multi-step remediations → K8s healer for cluster operations
+
+**Verification**: Programmatically restart a test container via Docker SDK → confirm container restarts → confirm health check passes. Run `docker_healer.test_connection()` to verify SDK connectivity.
+
+---
+
+### Phase 6 — Activepieces (Workflow & Notification Engine)
+
+> Currently: Container runs at :8888 but has zero workflows.
+
+#### [NEW] `automation/activepieces/` directory with flow definitions
+- **Escalation Ticket Flow**: When genai-agent escalates → Activepieces creates a Jira/Linear ticket via API
+- **Daily Incident Digest**: Cron flow that summarizes the last 24h of incidents and posts to Slack
+- **Post-Remediation Validation**: After auto-remediation → Activepieces polls health endpoint → if still failing, re-escalates
+- **SLA Breach Alerting**: Monitors incident response time → alerts if SLA threshold exceeded
+
+#### [NEW] `automation/activepieces/setup_guide.md`
+- Step-by-step guide to import flows into Activepieces UI
+- API webhook URLs for integration with genai-agent
+
+#### [MODIFY] [main.py (genai-agent)](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/app/main.py)
+- Add Activepieces webhook integration alongside n8n — send escalation events to both
+
+**Verification**: Open Activepieces at `localhost:8888` → import the ticket creation flow → trigger an escalation → confirm ticket is created.
+
+---
+
+### Phase 7 — Runbook Definitions
+
+> Currently: Remediation logic is scattered inside Ansible playbooks and n8n workflows. No formal runbook system.
+
+#### [NEW] `runbooks/` directory at project root
+- **`runbooks/definitions/`** — YAML runbook definitions:
+  - `memory_leak.yml` — Steps: identify leaking service → check GC metrics → scale memory → restart if needed → verify
+  - `service_crash.yml` — Steps: check container state → inspect exit code → restart → validate health → escalate if repeated
+  - `disk_exhaustion.yml` — Steps: identify large files → prune docker → clean logs → verify space
+  - `network_degradation.yml` — Steps: check DNS → reset network interfaces → verify connectivity
+  - `high_cpu.yml` — Steps: identify process → check for deadlocks → scale resources → restart
+  - `cascading_failure.yml` — Steps: identify blast radius via NetworkX → isolate failing service → remediate upstream → validate downstream
+  - `database_overload.yml` — Steps: check connection pool → kill long queries → failover to replica
+
+#### [NEW] `runbooks/engine.py`
+- Runbook engine that loads YAML definitions and executes steps sequentially
+- Each step maps to a remediation function (Docker SDK, Ansible, K8s)
+- Tracks step completion, timing, and rollback on failure
+- Integrates with the LangGraph remediation node
+
+#### [NEW] `runbooks/schema.yml`
+- JSON Schema for runbook YAML format validation
+
+**Verification**: Load all runbook YAMLs → validate against schema → dry-run each runbook and confirm step execution order matches definition.
+
+---
+
+### Phase 8 — NetworkX Enhancement (Finding Main Error Source)
+
+> Currently: [graph_builder.py](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/app/services/graph_builder.py) has basic traversal + ranking. Need advanced root cause isolation.
+
+#### [MODIFY] [graph_builder.py](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/app/services/graph_builder.py)
+- Add **PageRank-based root cause scoring**: Run PageRank on error-weighted graph to find the most influential failing node
+- Add **betweenness centrality analysis**: Identify single points of failure
+- Add **cascading failure simulation**: Given a failing node, simulate propagation through the graph and calculate total impact score
+- Add **anomaly correlation across dependent services**: If multiple services are alerting, find the common upstream ancestor
+
+#### [NEW] `ml-engine/app/api/graph_analysis.py`
+- New API endpoints:
+  - `GET /api/graph/root-cause-analysis?services=svc1,svc2` — Given multiple alerting services, find the most likely common root cause
+  - `GET /api/graph/critical-paths` — Identify all critical (single-point-of-failure) paths
+  - `GET /api/graph/cascade-simulation?failing_service=X` — Simulate cascade and return timeline
+
+#### [MODIFY] [ml_node.py](file:///e:/Users/Jayraj/synapse-riskops/genai-agent/app/ml_node.py)
+- Call the new `/api/graph/root-cause-analysis` endpoint with the alerting service
+- Pass enhanced graph analysis to downstream agents
+
+**Verification**: Call `/api/graph/root-cause-analysis?services=order-service,payment-service` → verify it returns `postgres-primary` as the common root cause. Run `python graph_builder.py` to verify PageRank + centrality calculations.
+
+---
+
+### Phase 9 — Statsmodels Enhancement (Predictive Analytics)
+
+> Currently: [risk_engine.py](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/app/services/risk_engine.py) uses Statsmodels for failure forecasting with basic ARIMA.
+
+#### [MODIFY] [risk_engine.py](file:///e:/Users/Jayraj/synapse-riskops/ml-engine/app/services/risk_engine.py)
+- Add **multi-variate forecasting**: Correlate CPU + memory + error_rate together instead of individual series
+- Add **trend decomposition**: Use STL decomposition to separate trend/seasonal/residual for better anomaly detection
+- Add **confidence intervals**: Return prediction_confidence as a proper confidence interval, not just a scalar
+
+#### [NEW] `ml-engine/app/models/trend_analyzer.py`
+- Statsmodels STL decomposition
+- Exponential smoothing (Holt-Winters) for seasonal workloads
+- Change-point detection for sudden shifts
+
+**Verification**: Feed sample_metrics.csv through the enhanced engine → verify forecasts include confidence intervals and multi-variate correlation.
+
+---
+
+## Summary: New Files & Modified Files
+
+### New Files (17)
+| File | Purpose |
+|------|---------|
+| `genai-agent/app/remediation/ansible_executor.py` | Programmatic Ansible/Semaphore execution |
+| `genai-agent/app/remediation/docker_healer.py` | Docker SDK container fixes |
+| `genai-agent/app/remediation/k8s_healer.py` | Kubernetes self-healing |
+| `genai-agent/app/telemetry.py` | OpenTelemetry instrumentation |
+| `ml-engine/app/telemetry.py` | OpenTelemetry instrumentation |
+| `ml-engine/app/api/graph_analysis.py` | Advanced NetworkX analysis endpoints |
+| `ml-engine/app/models/trend_analyzer.py` | Statsmodels trend decomposition |
+| `ansible/playbooks/health_check.yml` | Post-remediation validation |
+| `kubernetes/` (directory, ~10 files) | K8s manifests |
+| `runbooks/definitions/*.yml` (7 runbooks) | Formal runbook definitions |
+| `runbooks/engine.py` | Runbook execution engine |
+| `runbooks/schema.yml` | Runbook schema validation |
+| `automation/activepieces/setup_guide.md` | Activepieces onboarding |
+| `AUTOMATION_README.md` | Full automation documentation |
+
+### Modified Files (12)
+| File | Change |
+|------|--------|
+| `genai-agent/app/graph/state_graph.py` | Add remediation_node |
+| `genai-agent/app/main.py` | OTel init + Activepieces webhook |
+| `genai-agent/requirements.txt` | Add docker, kubernetes, opentelemetry packages |
+| `ml-engine/app/main.py` | OTel init |
+| `ml-engine/app/ml_node.py` | Enhanced graph analysis calls |
+| `ml-engine/app/services/graph_builder.py` | PageRank, centrality, cascade sim |
+| `ml-engine/app/services/risk_engine.py` | Multi-variate forecasting |
+| `ml-engine/requirements.txt` | Add opentelemetry packages |
+| `docker-compose.yml` | Add cadvisor, node-exporter, jaeger |
+| `docker/prometheus/prometheus.yml` | Additional scrape targets |
+| `docker/prometheus/rules/riskops_alerts.yml` | 15+ Netflix-style alert rules |
+| `docker/alertmanager/alertmanager.yml` | Multi-receiver severity routing |
+
+---
+
+## Verification Plan
+
+### Automated Tests
+```bash
+# Phase 1 - Ansible
+ansible-playbook --check ansible/playbooks/*.yml
+pytest genai-agent/tests/test_ansible_executor.py -v
+
+# Phase 2 - Prometheus/Alertmanager  
+docker compose up -d prometheus alertmanager cadvisor node-exporter
+curl http://localhost:9090/api/v1/rules | jq '.data.groups[].rules | length'
+curl http://localhost:9093/api/v2/status | jq '.config'
+
+# Phase 3 - Kubernetes
+kubectl apply --dry-run=client -f kubernetes/
+pytest genai-agent/tests/test_k8s_healer.py -v
+
+# Phase 4 - OpenTelemetry
+curl -X POST http://localhost:8001/diagnose -d @request.json
+# Then check Jaeger: http://localhost:16686
+
+# Phase 5 - Docker SDK
+pytest genai-agent/tests/test_docker_healer.py -v
+
+# Phase 7 - Runbooks
+python runbooks/engine.py --validate runbooks/definitions/
+pytest runbooks/tests/test_runbook_engine.py -v
+
+# Phase 8 - NetworkX
+pytest ml-engine/tests/test_graph_analysis.py -v
+python ml-engine/app/services/graph_builder.py  # visual check
+
+# Phase 9 - Statsmodels
+pytest ml-engine/tests/test_trend_analyzer.py -v
+
+# Full integration
+docker compose up -d
+curl http://localhost:8001/health  # genai-agent
+curl http://localhost:8000/health  # ml-engine
+curl http://localhost:9090/-/healthy  # prometheus
+curl http://localhost:9093/-/healthy  # alertmanager
+```
+
+### Manual Verification
+- Open Prometheus at `localhost:9090/alerts` → confirm all alert rules are loaded
+- Open Jaeger at `localhost:16686` → confirm traces appear after `/diagnose` call
+- Open Activepieces at `localhost:8888` → confirm imported flows are active
+- Trigger a simulated incident → watch the full pipeline: Prometheus alert → Alertmanager → n8n → GenAI diagnose → auto-remediate via Docker SDK → validate via health check → log to Slack
+
+### Post-Implementation Checklist
+For each tool, verify it is **actually running** (not just configured):
+
+| Tool | Running Check |
+|------|---------------|
+| Prometheus | `curl localhost:9090/-/healthy` returns `Prometheus Server is Healthy` |
+| Alertmanager | `curl localhost:9093/-/healthy` returns OK |
+| cAdvisor | `curl localhost:8082/metrics` returns container metrics |
+| Node Exporter | `curl localhost:9100/metrics` returns host metrics |
+| Jaeger | `curl localhost:16686` returns Jaeger UI |
+| OTel Collector | `curl localhost:8889/metrics` returns processed metrics |
+| Activepieces | `curl localhost:8888` returns Activepieces UI |
+| Ansible/Semaphore | `curl localhost:3000/api/ping` returns OK |
+| K8s Healer | `kubectl get pods -n synapse` shows all pods running |
+| Docker SDK | `python -c "import docker; print(docker.from_env().ping())"` returns True |
+| Runbook Engine | `python runbooks/engine.py --validate` returns 0 errors |
+| NetworkX (enhanced) | `curl localhost:8000/api/graph/critical-paths` returns data |
+| Statsmodels (enhanced) | `curl localhost:8000/api/risk-score` includes confidence_interval |

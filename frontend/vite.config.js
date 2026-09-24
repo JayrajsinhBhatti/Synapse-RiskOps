@@ -10,7 +10,13 @@ export default defineConfig({
     port: 5173,
     host: '0.0.0.0', // Required for Docker
     proxy: {
-      // Proxy API calls to Spring Boot backend during development
+      // Proxy Chatbot API calls to GenAI Agent (port 8001)
+      '/api/chatbot': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Proxy other API calls to Spring Boot backend during development
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,

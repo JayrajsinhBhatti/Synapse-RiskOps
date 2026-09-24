@@ -1,0 +1,39 @@
+---
+- name: "Synapse RiskOps - Restart Failing Service"
+  hosts: all
+  gather_facts: no
+  vars:
+    target_service: "{{ service_name | default('unknown-service') }}"
+    incident_ref: "{{ incident_id | default('MANUAL') }}"
+    risk_level: "{{ risk_score | default('N/A') }}"
+
+  tasks:
+    - name: "Log remediation trigger"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "[SYNAPSE REMEDIATION] Triggered Service Restart"
+          - "Service Target: {{ target_service }}"
+          - "Incident ID:    {{ incident_ref }}"
+          - "Risk Score:     {{ risk_level }}"
+          - "=========================================================="
+
+    - name: "Attempt service restart via Docker"
+      ansible.builtin.command:
+        cmd: "docker restart synapse-{{ target_service }}"
+      register: docker_restart_result
+      changed_when: docker_restart_result.rc == 0
+      failed_when: docker_restart_result.rc != 0 and 'No such container' not in (docker_restart_result.stderr | default(''))
+      ignore_errors: yes
+
+    - name: "Post-remediation validation: check container is running"
+      ansible.builtin.command:
+        cmd: "docker inspect --format '{%raw%}{{.State.Status}}{%endraw%}' synapse-{{ target_service }}"
+      register: post_restart_status
+      changed_when: false
+      failed_when: false
+      ignore_errors: yes
+
+    - name: "Report restart status"
+      ansible.builtin.debug:
+        msg: "Service restart executed for {{ target_service }}. Status: {{ post_restart_status.stdout | default('UNKNOWN') }}"

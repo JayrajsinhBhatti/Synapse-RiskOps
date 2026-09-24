@@ -1,0 +1,273 @@
+# =============================================================================
+# Synapse RiskOps — Netflix-Style Prometheus Alert Rules
+# =============================================================================
+# Comprehensive resource monitoring covering CPU, memory, disk, network,
+# error rates, latency, and service health. Triggered alerts are routed
+# through Alertmanager → n8n webhook → GenAI Agent RCA pipeline.
+# =============================================================================
+
+groups:
+  # -------------------------------------------------------------------
+  # Service Health & Availability
+  # -------------------------------------------------------------------
+  - name: synapse_service_health
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Service {{ $labels.job }} is DOWN"
+          description: "Target {{ $labels.instance }} has been unreachable for >1m."
+
+      - alert: MLEngineDown
+        expr: up{job="synapse-ml-engine"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "ML Engine is unreachable"
+          description: "The ML Engine service is down. Risk scoring is unavailable."
+
+      - alert: GenAIAgentDown
+        expr: up{job="synapse-genai-agent"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "GenAI Agent is unreachable"
+          description: "The GenAI RCA pipeline is down. Autonomous diagnostics unavailable."
+
+      - alert: BackendDown
+        expr: up{job="synapse-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Spring Boot Backend is unreachable"
+          description: "The backend API server is down."
+
+  # -------------------------------------------------------------------
+  # CPU Usage (Netflix-style progressive alerts)
+  # -------------------------------------------------------------------
+  - name: synapse_cpu
+    rules:
+      - alert: HighCpuUsage
+        expr: rate(container_cpu_usage_seconds_total{name=~"synapse-.*"}[5m]) * 100 > 80
+        for: 3m
+        labels:
+          severity: warning
+          category: cpu
+        annotations:
+          summary: "High CPU usage on {{ $labels.name }}"
+          description: "Container {{ $labels.name }} CPU usage is {{ $value | printf \"%.1f\" }}% (>80%) for 3m."
+
+      - alert: CriticalCpuUsage
+        expr: rate(container_cpu_usage_seconds_total{name=~"synapse-.*"}[5m]) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          category: cpu
+        annotations:
+          summary: "CRITICAL CPU on {{ $labels.name }}"
+          description: "Container {{ $labels.name }} CPU at {{ $value | printf \"%.1f\" }}% (>95%). Immediate action required."
+
+  # -------------------------------------------------------------------
+  # Memory Usage
+  # -------------------------------------------------------------------
+  - name: synapse_memory
+    rules:
+      - alert: HighMemoryUsage
+        expr: (container_memory_usage_bytes{name=~"synapse-.*"} / container_spec_memory_limit_bytes{name=~"synapse-.*"}) * 100 > 85
+        for: 3m
+        labels:
+          severity: warning
+          category: memory
+        annotations:
+          summary: "High memory usage on {{ $labels.name }}"
+          description: "Container {{ $labels.name }} memory at {{ $value | printf \"%.1f\" }}% of limit."
+
+      - alert: CriticalMemoryUsage
+        expr: (container_memory_usage_bytes{name=~"synapse-.*"} / container_spec_memory_limit_bytes{name=~"synapse-.*"}) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+          category: memory
+        annotations:
+          summary: "CRITICAL memory usage on {{ $labels.name }} — OOM risk"
+          description: "Container {{ $labels.name }} memory at {{ $value | printf \"%.1f\" }}%. OOMKill imminent."
+
+  # -------------------------------------------------------------------
+  # Disk / Storage
+  # -------------------------------------------------------------------
+  - name: synapse_disk
+    rules:
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+          category: disk
+        annotations:
+          summary: "Disk space critically low on {{ $labels.instance }}"
+          description: "Only {{ $value | printf \"%.1f\" }}% disk space remaining."
+
+      - alert: DiskSpaceWarning
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 20
+        for: 10m
+        labels:
+          severity: warning
+          category: disk
+        annotations:
+          summary: "Disk space running low on {{ $labels.instance }}"
+          description: "{{ $value | printf \"%.1f\" }}% disk space remaining."
+
+  # -------------------------------------------------------------------
+  # Network & Latency
+  # -------------------------------------------------------------------
+  - name: synapse_network
+    rules:
+      - alert: HighNetworkLatency
+        expr: rate(container_network_transmit_bytes_total{name=~"synapse-.*"}[5m]) > 100000000
+        for: 3m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "High network throughput on {{ $labels.name }}"
+          description: "Container {{ $labels.name }} transmitting >100MB/s for 3 minutes."
+
+      - alert: NetworkErrorsHigh
+        expr: rate(container_network_transmit_errors_total{name=~"synapse-.*"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "Network errors detected on {{ $labels.name }}"
+          description: "{{ $labels.name }} has >10 network errors/sec for 2m."
+
+  # -------------------------------------------------------------------
+  # Container Restarts & Crashes
+  # -------------------------------------------------------------------
+  - name: synapse_container_stability
+    rules:
+      - alert: ContainerRestarting
+        expr: increase(container_restart_count{name=~"synapse-.*"}[15m]) > 3
+        for: 1m
+        labels:
+          severity: critical
+          category: stability
+        annotations:
+          summary: "Container {{ $labels.name }} is crash-looping"
+          description: "Container restarted {{ $value }} times in 15 minutes."
+
+      - alert: ContainerOOMKilled
+        expr: container_oom_events_total{name=~"synapse-.*"} > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: memory
+        annotations:
+          summary: "Container {{ $labels.name }} was OOM killed"
+          description: "Out of memory event detected. Increase memory limit."
+
+  # -------------------------------------------------------------------
+  # Application-Level Risk Scoring
+  # -------------------------------------------------------------------
+  - name: synapse_riskops
+    rules:
+      - alert: HighRiskScore
+        expr: synapse_risk_score > 0.85
+        for: 2m
+        labels:
+          severity: critical
+          category: risk
+        annotations:
+          summary: "High risk score on {{ $labels.service }}"
+          description: "Risk score {{ $value | printf \"%.2f\" }} exceeds critical threshold (0.85)."
+
+      - alert: ElevatedRiskScore
+        expr: synapse_risk_score > 0.65
+        for: 5m
+        labels:
+          severity: warning
+          category: risk
+        annotations:
+          summary: "Elevated risk score on {{ $labels.service }}"
+          description: "Risk score {{ $value | printf \"%.2f\" }} is in the WATCH zone (>0.65)."
+
+  # -------------------------------------------------------------------
+  # Request Rate & Error Rate (SLI/SLO)
+  # -------------------------------------------------------------------
+  - name: synapse_sli
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+        for: 2m
+        labels:
+          severity: critical
+          category: error_rate
+        annotations:
+          summary: "High HTTP 5xx error rate on {{ $labels.job }}"
+          description: "Error rate is {{ $value | printf \"%.1f\" }}% (>5% for 2m)."
+
+      - alert: RequestSpikeDetected
+        expr: rate(http_requests_total[5m]) > 2 * rate(http_requests_total[1h] offset 1h)
+        for: 3m
+        labels:
+          severity: warning
+          category: traffic
+        annotations:
+          summary: "Request spike detected on {{ $labels.job }}"
+          description: "Request rate is >2x the baseline from 1h ago."
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+          category: latency
+        annotations:
+          summary: "P99 latency >2s on {{ $labels.job }}"
+          description: "99th percentile response time is {{ $value | printf \"%.2f\" }}s."
+
+  # -------------------------------------------------------------------
+  # Host-Level (Node Exporter)
+  # -------------------------------------------------------------------
+  - name: synapse_host
+    rules:
+      - alert: HostHighCpuLoad
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: cpu
+        annotations:
+          summary: "Host CPU load is high on {{ $labels.instance }}"
+          description: "Host CPU utilization is {{ $value | printf \"%.1f\" }}%."
+
+      - alert: HostHighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          category: memory
+        annotations:
+          summary: "Host memory critically high on {{ $labels.instance }}"
+          description: "Host memory usage at {{ $value | printf \"%.1f\" }}%."
+
+      - alert: HostSwapUsageHigh
+        expr: (1 - (node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes)) * 100 > 50
+        for: 5m
+        labels:
+          severity: warning
+          category: memory
+        annotations:
+          summary: "High swap usage on {{ $labels.instance }}"
+          description: "Swap usage at {{ $value | printf \"%.1f\" }}%. Possible memory pressure."

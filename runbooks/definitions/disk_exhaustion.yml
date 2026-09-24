@@ -1,0 +1,37 @@
+# =============================================================================
+# Runbook: Disk Exhaustion Remediation
+# =============================================================================
+
+name: Disk Exhaustion Remediation
+description: >
+  Handles disk_exhaustion by pruning Docker resources,
+  cleaning old logs, and verifying disk space recovery.
+
+failure_types:
+  - disk_exhaustion
+
+severity: high
+auto_trigger: true
+max_execution_time_seconds: 240
+
+steps:
+  - name: "Prune unused Docker images and volumes"
+    executor: docker
+    action: prune_system
+    params: {}
+    timeout_seconds: 120
+    on_failure: continue
+
+  - name: "Clear old container logs via Ansible"
+    executor: ansible
+    action: clear_disk
+    params: {}
+    timeout_seconds: 60
+    on_failure: continue
+
+  - name: "Verify disk space recovered"
+    executor: ansible
+    action: health_check
+    params: {}
+    timeout_seconds: 30
+    on_failure: escalate

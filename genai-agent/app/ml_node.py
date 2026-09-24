@@ -49,6 +49,21 @@ def get_ml_prediction(state: dict) -> dict:
         graph_response.raise_for_status()
         dependency_graph = graph_response.json()
 
+    # -----------------------------------------------------------------
+    # 3. Enhanced Root Cause Analysis — GET /api/graph/root-cause-analysis
+    # -----------------------------------------------------------------
+    enhanced_graph_analysis = {}
+    try:
+        rc_response = requests.get(
+            f"{ML_ENGINE_URL}/api/graph/root-cause-analysis",
+            params={"services": service_name},
+            timeout=10,
+        )
+        if rc_response.status_code == 200:
+            enhanced_graph_analysis = rc_response.json()
+    except Exception:
+        pass
+
     return {
         **state,
         "risk_score": prediction["risk_score"],
@@ -57,4 +72,5 @@ def get_ml_prediction(state: dict) -> dict:
         "predicted_failure_type": prediction["predicted_failure_type"],
         "prediction_horizon_minutes": prediction.get("prediction_horizon_minutes", 0),
         "dependency_graph": dependency_graph,
+        "enhanced_graph_analysis": enhanced_graph_analysis,
     }

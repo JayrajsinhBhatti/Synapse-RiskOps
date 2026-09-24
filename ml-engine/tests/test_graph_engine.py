@@ -11,6 +11,13 @@ Validates the NetworkX dependency graph engine:
 - API endpoint integration
 """
 
+import sys
+from pathlib import Path
+
+ML_ENGINE_ROOT = Path(__file__).resolve().parent.parent
+if str(ML_ENGINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(ML_ENGINE_ROOT))
+
 from app.services.graph_builder import GraphBuilder
 from app.schemas.graph import Criticality, ServiceType, DependencyType
 

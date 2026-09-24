@@ -1,12 +1,12 @@
-"""
-genai-agent/app/main.py
+"""genai-agent/app/main.py
 Owner: Person 1
 
 FastAPI application entrypoint for the GenAI Agent service.
-- Initializes the FastAPI app
-- Registers routers: /diagnose (RCA pipeline) and /route (confidence routing, Week 4)
+- Initializes the FastAPI app with OpenTelemetry instrumentation
+- Registers routers: /diagnose (RCA + remediation pipeline)
 - Wires up the LangGraph StateGraph from app/graph/state_graph.py on startup
 - Calls ml-engine's api/graph_traversal.py endpoint for dependency graph queries
+- Routes alerts to n8n and Activepieces automation engines
   (see shared/api-contracts.md for the contract)
 """
 
@@ -19,6 +19,7 @@ from loguru import logger
 
 from app.schemas.incident import DiagnoseRequest, DiagnoseResponse
 from app.graph.state_graph import pipeline
+from app.chatbot.router import router as chatbot_router
 
 
 app = FastAPI(
@@ -33,6 +34,13 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# Initialize OpenTelemetry
+try:
+    from app.telemetry import init_telemetry
+    init_telemetry(app)
+except Exception as exc:
+    logger.warning(f"OpenTelemetry init failed (non-fatal): {exc}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,9 +49,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(chatbot_router)
+
 N8N_WEBHOOK_URL = os.getenv(
     "N8N_WEBHOOK_URL",
     "http://n8n:5678/webhook/alert",
+)
+
+ACTIVEPIECES_WEBHOOK_URL = os.getenv(
+    "ACTIVEPIECES_WEBHOOK_URL",
+    "http://activepieces:80/api/v1/webhooks",
 )
 
 
@@ -84,24 +99,29 @@ async def diagnose(request: DiagnoseRequest):
         guidance=result.get("guidance"),
         routing_decision=result.get("routing_decision", "escalate"),
         routing_reason=result.get("routing_reason", ""),
+        remediation_result=result.get("remediation_result"),
     )
 
-    # Send the diagnosis and routing decision to n8n
+    # Send the diagnosis and routing decision to n8n + Activepieces
+    payload = response.model_dump()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(
-                N8N_WEBHOOK_URL,
-                json=response.model_dump(),
+            # n8n webhook
+            await client.post(N8N_WEBHOOK_URL, json=payload)
+            logger.info(
+                f"Sent routing decision to n8n: {response.routing_decision}"
             )
 
-        logger.info(
-            f"Sent routing decision to n8n: "
-            f"{response.routing_decision}"
-        )
+            # Activepieces webhook (for ticket creation / notifications)
+            try:
+                await client.post(ACTIVEPIECES_WEBHOOK_URL, json=payload)
+                logger.info("Sent event to Activepieces")
+            except Exception as ap_exc:
+                logger.warning(f"Activepieces webhook failed (non-fatal): {ap_exc}")
 
     except Exception as exc:
-        # n8n failure should not make the diagnosis itself fail
-        logger.warning(f"Failed to send alert to n8n: {exc}")
+        # Automation failure should not make the diagnosis itself fail
+        logger.warning(f"Failed to send alert to automation: {exc}")
 
     return response
 

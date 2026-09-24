@@ -12,9 +12,15 @@ Evaluates the FailureForecaster using rolling point-in-time backtesting:
 """
 
 import os
+import sys
 import glob
 import json
 from pathlib import Path
+
+ML_ENGINE_ROOT = Path(__file__).resolve().parent.parent
+if str(ML_ENGINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(ML_ENGINE_ROOT))
+
 import pandas as pd
 from app.models.failure_forecaster import FailureForecaster
 from app.services.csv_loader import CSVLoader

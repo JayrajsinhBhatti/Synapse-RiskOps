@@ -1,0 +1,53 @@
+{
+  "name": "Synapse - Escalation Ticket Flow",
+  "description": "Triggered when GenAI agent decides to escalate an incident to human engineers. Creates a Jira or Linear issue with root cause analysis and proactive guidance.",
+  "trigger": {
+    "type": "WEBHOOK",
+    "settings": {
+      "path": "/webhook/activepieces/escalate",
+      "method": "POST"
+    }
+  },
+  "actions": [
+    {
+      "name": "Parse Incident Payload",
+      "type": "CODE",
+      "settings": {
+        "code": "exports.code = async (inputs) => {\n  const incident = inputs.body;\n  return {\n    incident_id: incident.incident_id || 'UNKNOWN',\n    service_name: incident.service_name || 'unknown-service',\n    risk_score: incident.risk_score || 0,\n    root_cause: incident.root_cause || incident.routing_reason || 'Pending investigation',\n    confidence: incident.confidence || 0,\n    playbook_steps: incident.remediation_playbook || []\n  };\n};"
+      }
+    },
+    {
+      "name": "Format Incident Markdown",
+      "type": "CODE",
+      "settings": {
+        "code": "exports.code = async (inputs) => {\n  const data = inputs.parsed;\n  return {\n    title: `[Synapse RiskOps] Escalation: ${data.service_name} (Risk: ${data.risk_score})`,\n    description: `### Incident Details\\n- **ID**: ${data.incident_id}\\n- **Service**: ${data.service_name}\\n- **Risk Score**: ${data.risk_score}\\n- **Confidence**: ${(data.confidence * 100).toFixed(1)}%\\n\\n### Root Cause Analysis\\n${data.root_cause}\\n\\n### Recommended Actions\\n${(data.playbook_steps || []).map((s, i) => `${i+1}. ${s}`).join('\\n')}`\n  };\n};"
+      }
+    },
+    {
+      "name": "Create Linear or Jira Issue",
+      "type": "HTTP",
+      "settings": {
+        "method": "POST",
+        "url": "{{connections.TICKET_SYSTEM_URL}}/api/issues",
+        "headers": {
+          "Authorization": "Bearer {{connections.TICKET_SYSTEM_API_KEY}}",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "title": "{{step_2.title}}",
+          "description": "{{step_2.description}}",
+          "priority": "High",
+          "labels": ["synapse-riskops", "automated-incident", "escalation"]
+        }
+      }
+    },
+    {
+      "name": "Notify Incident Channel in Slack",
+      "type": "SLACK_SEND_MESSAGE",
+      "settings": {
+        "channel": "#synapse-incidents",
+        "text": ":rotating_light: *Incident Escalated to Engineer*\\nService: *{{step_1.service_name}}*\\nTicket created: {{step_3.body.url || 'Pending'}}\\nReason: {{step_1.root_cause}}"
+      }
+    }
+  ]
+}

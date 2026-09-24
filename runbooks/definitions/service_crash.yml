@@ -1,0 +1,67 @@
+# =============================================================================
+# Runbook: Service Crash Remediation
+# =============================================================================
+
+name: Service Crash Remediation
+description: >
+  Handles service_crash failures by inspecting container state,
+  checking exit codes, restarting the service, and validating health.
+  Escalates if the crash repeats.
+
+failure_types:
+  - service_crash
+  - connection_pool_exhaustion
+
+severity: critical
+auto_trigger: true
+max_execution_time_seconds: 180
+
+steps:
+  - name: "Inspect container state and exit code"
+    executor: docker
+    action: inspect_health
+    params:
+      container_prefix: "synapse-"
+    timeout_seconds: 10
+    on_failure: continue
+
+  - name: "Capture crash logs"
+    executor: docker
+    action: get_logs
+    params:
+      tail: 300
+    timeout_seconds: 15
+    on_failure: continue
+
+  - name: "Restart crashed service"
+    executor: docker
+    action: restart_container
+    params:
+      timeout: 30
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Wait for service startup"
+    executor: script
+    action: sleep
+    params:
+      seconds: 10
+    timeout_seconds: 15
+    on_failure: continue
+
+  - name: "Validate health after restart"
+    executor: ansible
+    action: health_check
+    params: {}
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Check restart count for crash loop"
+    executor: docker
+    action: inspect_health
+    params:
+      container_prefix: "synapse-"
+      check_restart_count: true
+      max_restarts: 3
+    timeout_seconds: 10
+    on_failure: escalate

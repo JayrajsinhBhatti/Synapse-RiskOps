@@ -1,0 +1,55 @@
+# =============================================================================
+# Runbook: High CPU Remediation
+# =============================================================================
+
+name: High CPU Remediation
+description: >
+  Handles high_cpu by identifying the resource-hungry process,
+  scaling container resources, and restarting if needed.
+
+failure_types:
+  - high_cpu
+
+severity: high
+auto_trigger: true
+max_execution_time_seconds: 240
+
+steps:
+  - name: "Inspect container resource usage"
+    executor: docker
+    action: inspect_health
+    params:
+      container_prefix: "synapse-"
+    timeout_seconds: 10
+    on_failure: continue
+
+  - name: "Scale container CPU quota"
+    executor: docker
+    action: update_resources
+    params:
+      cpu_quota: 200000
+      cpu_period: 100000
+    timeout_seconds: 30
+    on_failure: continue
+
+  - name: "Scale memory to reduce swap pressure"
+    executor: ansible
+    action: scale_resources
+    params: {}
+    timeout_seconds: 60
+    on_failure: continue
+
+  - name: "Restart service if CPU still high"
+    executor: docker
+    action: restart_container
+    params:
+      timeout: 30
+    timeout_seconds: 60
+    on_failure: escalate
+
+  - name: "Validate service health"
+    executor: ansible
+    action: health_check
+    params: {}
+    timeout_seconds: 30
+    on_failure: escalate

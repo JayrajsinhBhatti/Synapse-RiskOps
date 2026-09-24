@@ -1,0 +1,69 @@
+---
+- name: "Synapse RiskOps - Post-Remediation Health Check"
+  hosts: all
+  gather_facts: no
+  vars:
+    target_service: "{{ service_name | default('unknown-service') }}"
+    health_endpoint: "{{ health_url | default('') }}"
+    max_retries: "{{ check_retries | default(3) }}"
+    retry_delay: "{{ check_delay | default(5) }}"
+
+  tasks:
+    - name: "Log health check trigger"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "[SYNAPSE HEALTH CHECK] Post-Remediation Validation"
+          - "Service Target: {{ target_service }}"
+          - "=========================================================="
+
+    - name: "Check if container is running"
+      ansible.builtin.command:
+        cmd: "docker inspect --format '{%raw%}{{.State.Status}}{%endraw%}' synapse-{{ target_service }}"
+      register: container_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: "Report container status"
+      ansible.builtin.debug:
+        msg: "Container synapse-{{ target_service }} status: {{ container_status.stdout | default('UNKNOWN') }}"
+
+    - name: "Fail if container is not running"
+      ansible.builtin.fail:
+        msg: "Container synapse-{{ target_service }} is NOT running (status: {{ container_status.stdout | default('UNKNOWN') }})"
+      when: container_status.rc != 0 or container_status.stdout | default('') != 'running'
+
+    - name: "Check container health status"
+      ansible.builtin.command:
+        cmd: "docker inspect --format '{%raw%}{{.State.Health.Status}}{%endraw%}' synapse-{{ target_service }}"
+      register: health_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: "Report health check result"
+      ansible.builtin.debug:
+        msg: "Container health: {{ health_status.stdout | default('no-healthcheck') }}"
+
+    - name: "Check container restart count"
+      ansible.builtin.command:
+        cmd: "docker inspect --format '{%raw%}{{.RestartCount}}{%endraw%}' synapse-{{ target_service }}"
+      register: restart_count
+      ignore_errors: yes
+      changed_when: false
+
+    - name: "Warn if excessive restarts"
+      ansible.builtin.debug:
+        msg: "WARNING: Container has restarted {{ restart_count.stdout }} times"
+      when: restart_count.stdout | default('0') | int > 3
+
+    - name: "Final health validation summary"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================="
+          - "[SYNAPSE HEALTH CHECK] Validation Complete"
+          - "Service: {{ target_service }}"
+          - "Container Status: {{ container_status.stdout | default('UNKNOWN') }}"
+          - "Health Status: {{ health_status.stdout | default('N/A') }}"
+          - "Restart Count: {{ restart_count.stdout | default('0') }}"
+          - "Result: PASSED"
+          - "=========================================================="

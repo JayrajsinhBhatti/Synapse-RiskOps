@@ -1,0 +1,62 @@
+{
+  "name": "Synapse - Post-Remediation Validation",
+  "description": "Triggered immediately following an automated remediation attempt. Polls service health metrics 60s and 180s later; if still unhealthy, immediately triggers secondary escalation.",
+  "trigger": {
+    "type": "WEBHOOK",
+    "settings": {
+      "path": "/webhook/activepieces/validate-remediation",
+      "method": "POST"
+    }
+  },
+  "actions": [
+    {
+      "name": "Wait For Service Stabilization",
+      "type": "DELAY",
+      "settings": {
+        "delay": 30,
+        "unit": "SECONDS"
+      }
+    },
+    {
+      "name": "Probe Service Health Endpoint",
+      "type": "HTTP",
+      "settings": {
+        "method": "GET",
+        "url": "http://{{trigger.body.service_host || 'backend'}}:{{trigger.body.service_port || '8080'}}/actuator/health",
+        "timeout": 5000
+      }
+    },
+    {
+      "name": "Evaluate Health Status",
+      "type": "BRANCH",
+      "settings": {
+        "condition": "{{step_2.body.status == 'UP'}}"
+      },
+      "on_true": [
+        {
+          "name": "Notify Validation Passed",
+          "type": "SLACK_SEND_MESSAGE",
+          "settings": {
+            "channel": "#synapse-incidents",
+            "text": ":white_check_mark: Remediation validated for *{{trigger.body.service_name}}*. Service is healthy and passing probes."
+          }
+        }
+      ],
+      "on_false": [
+        {
+          "name": "Trigger Emergency Escalation",
+          "type": "HTTP",
+          "settings": {
+            "method": "POST",
+            "url": "http://genai-agent:8001/escalate",
+            "body": {
+              "service_name": "{{trigger.body.service_name}}",
+              "incident_id": "{{trigger.body.incident_id}}",
+              "reason": "Post-remediation probe failed. Service status is not UP."
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

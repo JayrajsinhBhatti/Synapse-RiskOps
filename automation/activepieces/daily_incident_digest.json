@@ -1,0 +1,38 @@
+{
+  "name": "Synapse - Daily Incident Digest",
+  "description": "Cron flow that summarizes the last 24 hours of incidents, remediation success rate, and recurring root causes, posting a report to Slack.",
+  "trigger": {
+    "type": "SCHEDULE",
+    "settings": {
+      "cronExpression": "0 8 * * *"
+    }
+  },
+  "actions": [
+    {
+      "name": "Fetch 24h Incident Records",
+      "type": "HTTP",
+      "settings": {
+        "method": "GET",
+        "url": "http://genai-agent:8001/history?hours=24",
+        "headers": {
+          "Accept": "application/json"
+        }
+      }
+    },
+    {
+      "name": "Compute Reliability Metrics",
+      "type": "CODE",
+      "settings": {
+        "code": "exports.code = async (inputs) => {\n  const incidents = inputs.data || [];\n  const total = incidents.length;\n  const autoFixed = incidents.filter(i => i.decision === 'auto_remediate').length;\n  const escalated = incidents.filter(i => i.decision === 'escalate_to_human').length;\n  const successRate = total > 0 ? ((autoFixed / total) * 100).toFixed(1) : '100.0';\n  return {\n    total_incidents: total,\n    auto_remediated: autoFixed,\n    escalated: escalated,\n    success_rate_percent: successRate\n  };\n};"
+      }
+    },
+    {
+      "name": "Post Digest to Slack",
+      "type": "SLACK_SEND_MESSAGE",
+      "settings": {
+        "channel": "#synapse-ops-digest",
+        "text": ":bar_chart: *Synapse RiskOps — 24-Hour Incident Digest*\\n- Total Incidents: *{{step_2.total_incidents}}*\\n- Auto-Remediated: *{{step_2.auto_remediated}}*\\n- Escalated to Engineers: *{{step_2.escalated}}*\\n- Self-Healing Success Rate: *{{step_2.success_rate_percent}}%*"
+      }
+    }
+  ]
+}

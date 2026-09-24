@@ -1,0 +1,66 @@
+# =============================================================================
+# Synapse RiskOps - OpenTelemetry Collector Configuration
+# =============================================================================
+# Receives traces, metrics, and logs from instrumented services.
+# Exports to Jaeger (traces), Prometheus (metrics), and debug (logs).
+# =============================================================================
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  # Add resource attributes to all telemetry
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "development"
+        action: upsert
+      - key: service.namespace
+        value: "synapse-riskops"
+        action: upsert
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  # Prometheus metrics exporter (scraped by Prometheus)
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "synapse_riskops"
+
+  # Jaeger trace exporter
+  otlp/jaeger:
+    endpoint: "jaeger:4317"
+    tls:
+      insecure: true
+
+  # Debug exporter for development
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, debug]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug]

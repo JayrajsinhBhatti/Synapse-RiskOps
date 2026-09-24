@@ -1,0 +1,168 @@
+# =============================================================================
+# Synapse RiskOps - Kubernetes Deployments
+# =============================================================================
+# Deployment manifests for all Synapse services.
+# Each deployment includes resource limits, health checks, and
+# restart policies for self-healing.
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genai-agent
+  namespace: synapse
+  labels:
+    app: genai-agent
+    component: ai
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: genai-agent
+  template:
+    metadata:
+      labels:
+        app: genai-agent
+        component: ai
+    spec:
+      containers:
+        - name: genai-agent
+          image: synapse-riskops/genai-agent:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: synapse-secrets
+                  key: gemini-api-key
+            - name: ML_ENGINE_URL
+              value: "http://ml-engine:8000"
+            - name: N8N_WEBHOOK_URL
+              value: "http://n8n:5678/webhook/alert"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-engine
+  namespace: synapse
+  labels:
+    app: ml-engine
+    component: ml
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ml-engine
+  template:
+    metadata:
+      labels:
+        app: ml-engine
+        component: ml
+    spec:
+      containers:
+        - name: ml-engine
+          image: synapse-riskops/ml-engine:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+      restartPolicy: Always
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: synapse
+  labels:
+    app: backend
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        component: api
+    spec:
+      containers:
+        - name: backend
+          image: synapse-riskops/backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/synapse_riskops"
+            - name: ML_ENGINE_URL
+              value: "http://ml-engine:8000"
+            - name: GENAI_AGENT_URL
+              value: "http://genai-agent:8001"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      restartPolicy: Always

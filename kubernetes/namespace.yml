@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: synapse
+  labels:
+    app.kubernetes.io/name: synapse-riskops
+    app.kubernetes.io/part-of: synapse-riskops

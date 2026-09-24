@@ -19,7 +19,7 @@ Queried by api/graph_traversal.py and consumed by genai-agent for RCA.
 import pandas as pd
 import networkx as nx
 from loguru import logger
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 
 from app.core.config import settings
@@ -292,6 +292,114 @@ class GraphBuilder:
             reverse=True,
         )
 
+        return candidates
+
+    def calculate_pagerank(self, alpha: float = 0.85) -> Dict[str, float]:
+        """Calculate PageRank score for all services in the graph."""
+        if not self.is_built:
+            self.build_graph()
+        try:
+            return nx.pagerank(self.graph, alpha=alpha)
+        except Exception as exc:
+            logger.warning(f"PageRank computation failed: {exc}")
+            n = self.graph.number_of_nodes()
+            return {node: 1.0 / max(1, n) for node in self.graph.nodes}
+
+    def calculate_betweenness_centrality(self) -> Dict[str, float]:
+        """Calculate betweenness centrality to identify single points of failure."""
+        if not self.is_built:
+            self.build_graph()
+        try:
+            return nx.betweenness_centrality(self.graph)
+        except Exception as exc:
+            logger.warning(f"Betweenness centrality computation failed: {exc}")
+            return {node: 0.0 for node in self.graph.nodes}
+
+    def simulate_cascade(self, failing_service: str) -> Dict[str, Any]:
+        """
+        Simulate cascading failure propagation through dependencies when a service fails.
+        """
+        if not self.is_built:
+            self.build_graph()
+        if failing_service not in self.graph:
+            return {"error": f"Service '{failing_service}' not found", "timeline": []}
+
+        affected_by_depth: Dict[int, List[str]] = {0: [failing_service]}
+        visited = {failing_service}
+        current_level = {failing_service}
+        depth = 0
+
+        while current_level:
+            next_level = set()
+            for node in current_level:
+                for pred in self.graph.predecessors(node):
+                    if pred not in visited:
+                        visited.add(pred)
+                        next_level.add(pred)
+            depth += 1
+            if next_level:
+                affected_by_depth[depth] = sorted(next_level)
+            current_level = next_level
+
+        timeline = []
+        for d in sorted(affected_by_depth.keys()):
+            for svc in affected_by_depth[d]:
+                node_data = self.graph.nodes.get(svc, {})
+                timeline.append({
+                    "service_name": svc,
+                    "propagation_depth": d,
+                    "criticality": getattr(node_data.get("criticality"), "value", str(node_data.get("criticality", "MEDIUM"))),
+                    "estimated_delay_seconds": d * 30,
+                })
+
+        return {
+            "root_failure": failing_service,
+            "total_impacted_services": len(visited) - 1,
+            "blast_radius_percent": round(((len(visited) - 1) / max(1, self.graph.number_of_nodes())) * 100, 1),
+            "timeline": timeline,
+        }
+
+    def find_common_root_cause(self, alerting_services: List[str]) -> List[Dict[str, Any]]:
+        """
+        Given multiple alerting services, find their common upstream dependencies
+        and rank them by composite influence score (PageRank + centrality + criticality).
+        """
+        if not self.is_built:
+            self.build_graph()
+        valid_services = [s for s in alerting_services if s in self.graph]
+        if not valid_services:
+            return []
+
+        ancestor_sets = []
+        for svc in valid_services:
+            ancestors = set(nx.descendants(self.graph, svc))
+            ancestors.add(svc)
+            ancestor_sets.append(ancestors)
+
+        common_ancestors = set.intersection(*ancestor_sets) if ancestor_sets else set()
+        pagerank = self.calculate_pagerank()
+        centrality = self.calculate_betweenness_centrality()
+
+        crit_weights = {Criticality.CRITICAL: 4, Criticality.HIGH: 3, Criticality.MEDIUM: 2, Criticality.LOW: 1}
+
+        candidates = []
+        for node in common_ancestors:
+            node_data = self.graph.nodes.get(node, {})
+            crit = node_data.get("criticality", Criticality.MEDIUM)
+            pr_score = pagerank.get(node, 0.0)
+            bc_score = centrality.get(node, 0.0)
+            crit_val = crit_weights.get(crit, 2)
+            composite = (pr_score * 40.0) + (bc_score * 30.0) + (crit_val * 10.0)
+
+            candidates.append({
+                "service_name": node,
+                "composite_score": round(composite, 4),
+                "pagerank": round(pr_score, 6),
+                "betweenness_centrality": round(bc_score, 6),
+                "criticality": getattr(crit, "value", str(crit)),
+            })
+
+        candidates.sort(key=lambda x: x["composite_score"], reverse=True)
         return candidates
 
 

@@ -4,9 +4,12 @@
  * Phase 1 placeholder. Full routing, auth context,
  * and React Query provider will be added in Phase 11.
  */
+import ChatWidget from './components/chatbot/ChatWidget';
+
 function App() {
   return (
     <div className="min-h-screen flex items-center justify-center">
+      <ChatWidget />
       <div className="glass-card p-12 text-center max-w-lg">
         {/* Logo / Brand */}
         <div className="mb-6">

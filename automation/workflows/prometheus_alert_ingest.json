@@ -1,0 +1,110 @@
+{
+  "id": "9Z1xkLow7YGDR4qN",
+  "name": "Synapse - Prometheus Alert Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "prometheus-alert",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-400, 0],
+      "id": "e12a8019-7b39-4d20-a019-12390abcf012",
+      "name": "Alertmanager Webhook",
+      "webhookId": "f78190ab-1290-4819-bf90-12908abdf190"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.item.json.body || $input.item.json;\nconst alerts = Array.isArray(payload.alerts) ? payload.alerts : [payload];\n\nconst normalized = alerts.map((alert, idx) => {\n  const labels = alert.labels || {};\n  const annotations = alert.annotations || {};\n  const alertname = labels.alertname || 'PrometheusAlert';\n  const service_name = labels.service || labels.job || 'synapse-service';\n  const severity = (labels.severity || 'warning').toLowerCase();\n  const instance = labels.instance || 'synapse-host';\n  \n  let failure_type = 'service_crash';\n  if (alertname.toLowerCase().includes('memory')) {\n    failure_type = 'memory_leak';\n  } else if (alertname.toLowerCase().includes('disk')) {\n    failure_type = 'disk_exhaustion';\n  } else if (alertname.toLowerCase().includes('network')) {\n    failure_type = 'network_degradation';\n  } else if (alertname.toLowerCase().includes('down') || alertname.toLowerCase().includes('crash')) {\n    failure_type = 'service_crash';\n  } else if (alertname.toLowerCase().includes('risk')) {\n    failure_type = 'memory_leak';\n  }\n  \n  const risk_score = severity === 'critical' ? 91.5 : (severity === 'warning' ? 68.0 : 45.0);\n  const routing_decision = severity === 'critical' ? 'auto_remediate' : 'escalate';\n  const incident_id = `PROM-${Date.now()}-${idx + 1}`;\n\n  return {\n    incident_id,\n    source: 'prometheus-alertmanager',\n    alertname,\n    severity,\n    service_name,\n    target_host: instance,\n    predicted_failure_type: failure_type,\n    risk_score,\n    routing_decision,\n    summary: annotations.summary || alertname,\n    description: annotations.description || 'Prometheus alert firing',\n    labels,\n    annotations,\n    timestamp: new Date().toISOString()\n  };\n});\n\nreturn normalized.map(item => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-160, 0],
+      "id": "f8209bc1-4910-419b-b019-29108fbc8190",
+      "name": "Normalize Alertmanager Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/alert",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service_name\": \"{{ $json.service_name }}\",\n  \"risk_score\": {{ $json.risk_score }},\n  \"predicted_failure_type\": \"{{ $json.predicted_failure_type }}\",\n  \"target_host\": \"{{ $json.target_host }}\",\n  \"routing_decision\": \"{{ $json.routing_decision }}\",\n  \"source\": \"{{ $json.source }}\",\n  \"details\": {\n    \"alertname\": \"{{ $json.alertname }}\",\n    \"severity\": \"{{ $json.severity }}\",\n    \"summary\": \"{{ $json.summary }}\"\n  }\n}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [120, 0],
+      "id": "a90182bc-5819-48ab-bf90-89108bc01928",
+      "name": "Forward to Alert Routing Pipeline",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"status\": \"PROCESSED\",\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service\": \"{{ $json.service_name }}\",\n  \"routing_decision\": \"{{ $json.routing_decision }}\",\n  \"forward_status\": \"{{ $json.statusCode || 200 }}\",\n  \"processed_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [360, 0],
+      "id": "c19082ba-9182-419b-a019-91820bc01928",
+      "name": "Log Ingestion Success"
+    }
+  ],
+  "connections": {
+    "Alertmanager Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Alertmanager Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Alertmanager Payload": {
+      "main": [
+        [
+          {
+            "node": "Forward to Alert Routing Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forward to Alert Routing Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Log Ingestion Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "availableInMCP": true
+  }
+}
