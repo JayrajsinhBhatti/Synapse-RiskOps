@@ -21,8 +21,8 @@ router = APIRouter(prefix="/api/chatbot", tags=["Chatbot"])
 
 
 class ChatMessageRequest(BaseModel):
-    message: str = Field(..., example="How is payment-service doing?")
-    session_id: Optional[str] = Field(None, example="3fa85f64-5717-4562-b3fc-2c963f66afa6")
+    message: str = Field(..., description="User message or prompt", json_schema_extra={"example": "How is payment-service doing?"})
+    session_id: Optional[str] = Field(None, description="Optional conversation session ID", json_schema_extra={"example": "3fa85f64-5717-4562-b3fc-2c963f66afa6"})
 
 
 class ChatMessageResponse(BaseModel):
