@@ -122,10 +122,10 @@ INSERT INTO users (username, email, password_hash, full_name, role)
 VALUES (
     'admin',
     'admin@synapse-riskops.local',
-    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+    '$2b$10$b213yKULfHN/8eiU1Z/Alu2jQZLblxFZWmIv.RdJ9ODKCgGYt6pdK',
     'System Administrator',
     'ADMIN'
-) ON CONFLICT (username) DO NOTHING;
+) ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;
 
 -- =====================================================
 -- SEED DATA: Sample services for dependency graph

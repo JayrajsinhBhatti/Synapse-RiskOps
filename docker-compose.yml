@@ -4,7 +4,7 @@
 # =====================================================
 # Services:
 #   1. postgres     - PostgreSQL 16 database              [Person 2]
-#   2. backend      - Spring Boot API (Java 21)            [Person 2]
+#   2. backend      - FastAPI Core Backend (Python 3.11)  [Person 2]
 #   3. ml-engine    - FastAPI ML Engine (Python 3.11)       [Person 2]
 #   4. frontend     - React Dashboard (Vite + Nginx)        [Person 2]
 #   5. genai-agent  - FastAPI + LangGraph RCA agent         [Person 1]
@@ -39,7 +39,7 @@ services:
       - synapse-network
 
   # ===================================================
-  # Spring Boot Backend
+  # FastAPI Core Backend               [Person 2, Week 5]
   # ===================================================
   backend:
     build:
@@ -50,23 +50,24 @@ services:
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
-      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/synapse_riskops}
-      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-synapse_admin}
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-synapse_dev_2026}
+      BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
+      BACKEND_PORT: ${BACKEND_PORT:-8080}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://synapse_admin:synapse_dev_2026@postgres:5432/synapse_riskops}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql://synapse_admin:synapse_dev_2026@postgres:5432/synapse_riskops}
       JWT_SECRET: ${JWT_SECRET:-dev_only_jwt_secret_key_do_not_use_in_production_change_this_immediately_64chars}
-      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-1440}
       ML_ENGINE_URL: ${ML_ENGINE_URL:-http://ml-engine:8000}
       GENAI_AGENT_URL: ${GENAI_AGENT_URL:-http://genai-agent:8001}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost:8080}
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 15s
     networks:
       - synapse-network
 
