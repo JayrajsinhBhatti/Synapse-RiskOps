@@ -3,20 +3,21 @@
 @tailwind utilities;
 
 /* =====================================================
-   Synapse RiskOps - Global Styles
+   Synapse RiskOps - Global Styles & Cyber/Noir Theme
    ===================================================== */
 
 @layer base {
   :root {
-    --color-synapse-primary: #6366f1;
-    --color-synapse-secondary: #818cf8;
+    --color-synapse-primary: #00d9ff;
+    --color-synapse-secondary: #6366f1;
     --color-synapse-accent: #a5b4fc;
   }
 
   body {
-    @apply font-sans;
-    background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+    @apply font-sans text-slate-100;
+    background-color: #07070d;
     min-height: 100vh;
+    overflow-x: hidden;
   }
 
   /* Custom scrollbar */
@@ -26,15 +27,15 @@
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-gray-900;
+    @apply bg-neutral-950;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-gray-700 rounded-full;
+    @apply bg-neutral-800 rounded-full;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-600;
+    @apply bg-cyan-700;
   }
 }
 
@@ -63,7 +64,7 @@
 
   /* Gradient text */
   .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-synapse-400 to-synapse-200;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-indigo-300 to-purple-400;
   }
 
   /* Pulse animation for live indicators */
@@ -86,5 +87,157 @@
       transform: scale(2);
       opacity: 0;
     }
+  }
+
+  /* Landing Page Tailored Styles */
+  .hero-section {
+    @apply w-full h-screen bg-black;
+  }
+
+  .problem-section {
+    @apply py-28 bg-neutral-950 border-t border-neutral-900;
+  }
+
+  .problem-container {
+    @apply max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-2 gap-16 items-center;
+  }
+
+  .stats-grid {
+    @apply grid grid-cols-2 gap-6;
+  }
+
+  .stat-card {
+    @apply bg-neutral-900/90 p-6 rounded-xl border border-neutral-800 hover:border-cyan-500/60 transition-all duration-300 shadow-lg shadow-black/40 hover:-translate-y-1;
+  }
+
+  .stat-value {
+    @apply text-3xl sm:text-4xl font-extrabold text-cyan-400 mb-2 tracking-tight flex items-baseline gap-1;
+  }
+
+  .stat-desc {
+    @apply text-sm text-neutral-400 font-medium;
+  }
+
+  .problem-copy h2 {
+    @apply text-3xl sm:text-4xl font-bold text-white mb-6 tracking-tight;
+  }
+
+  .problem-copy p {
+    @apply text-lg text-neutral-300 leading-relaxed;
+  }
+
+  .how-it-works-section {
+    @apply py-28 bg-black px-6 border-t border-neutral-900 relative overflow-hidden;
+  }
+
+  .architecture-diagram {
+    @apply max-w-5xl mx-auto my-12 relative;
+  }
+
+  .arch-svg {
+    @apply w-full drop-shadow-[0_0_35px_rgba(0,217,255,0.15)];
+  }
+
+  .flow-line {
+    @apply stroke-cyan-400 stroke-2;
+    stroke-dasharray: 6;
+    animation: flow 2.5s linear infinite;
+  }
+
+  @keyframes flow {
+    from {
+      stroke-dashoffset: 24;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  .supporting-copy {
+    @apply max-w-2xl mx-auto text-center text-neutral-400 text-lg leading-relaxed;
+  }
+
+  .capabilities-section {
+    @apply py-28 bg-neutral-950 px-6 border-t border-neutral-900;
+  }
+
+  .capabilities-grid {
+    @apply max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-12;
+  }
+
+  .capability-card {
+    @apply bg-neutral-900/80 backdrop-blur-md p-8 rounded-xl border border-neutral-800 hover:border-cyan-500/60 hover:shadow-cyan-500/10 hover:shadow-2xl transition-all duration-300;
+  }
+
+  .cap-icon {
+    @apply text-4xl mb-4 p-3 bg-neutral-800/60 inline-block rounded-lg border border-neutral-700/50;
+  }
+
+  .capability-card h3 {
+    @apply text-xl font-bold text-white mb-2;
+  }
+
+  .capability-card p {
+    @apply text-sm text-neutral-400 leading-relaxed;
+  }
+
+  .tech-stack-section {
+    @apply py-28 bg-black px-6 border-t border-neutral-900;
+  }
+
+  .tech-grid {
+    @apply max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-12;
+  }
+
+  .tech-category {
+    @apply bg-neutral-900/50 p-6 rounded-xl border border-neutral-800/80;
+  }
+
+  .tech-category h4 {
+    @apply font-bold text-cyan-400 mb-4 tracking-wide uppercase text-sm;
+  }
+
+  .tech-badges {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .tech-badge {
+    @apply bg-neutral-800/90 text-neutral-300 px-3 py-1.5 rounded-md text-xs font-mono border border-neutral-700/60 hover:border-cyan-500/40 hover:text-cyan-300 transition-colors;
+  }
+
+  .cta-section {
+    @apply py-32 bg-gradient-to-b from-neutral-950 via-neutral-900 to-black px-6 border-t border-neutral-800 relative overflow-hidden;
+  }
+
+  .cta-container {
+    @apply max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 items-center;
+  }
+
+  .cta-copy h2 {
+    @apply text-4xl sm:text-5xl font-extrabold text-white mb-6 tracking-tight;
+  }
+
+  .cta-checklist {
+    @apply list-none my-8 space-y-3;
+  }
+
+  .cta-checklist li {
+    @apply text-neutral-300 flex items-center gap-3 text-base;
+  }
+
+  .cta-buttons {
+    @apply flex flex-wrap gap-4 mt-8;
+  }
+
+  .btn {
+    @apply px-7 py-3.5 rounded-lg font-semibold transition-all duration-300 shadow-md;
+  }
+
+  .btn-primary {
+    @apply bg-cyan-400 text-black hover:bg-cyan-300 hover:shadow-cyan-400/30 hover:shadow-lg active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply border border-neutral-700 bg-neutral-900/80 text-white hover:border-cyan-500 hover:text-cyan-400 active:scale-95;
   }
 }

@@ -1,10 +1,8 @@
 /**
  * frontend/src/App.jsx
- * Owner: Person 2 | Week: 6
  * 
  * Root Application Component.
- * Configures TanStack React Query, AuthProvider, ChatbotProvider,
- * and mounts the Cyber-Ops DashboardLayout and DashboardPage.
+ * Supports switching between the cinematic Landing Page and the Cyber-Ops Dashboard.
  */
 
 import React, { useState } from 'react';
@@ -13,6 +11,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ChatbotProvider } from './context/ChatbotContext';
 import DashboardLayout from './layouts/DashboardLayout';
 import DashboardPage from './pages/DashboardPage';
+import LandingPage from './pages/LandingPage';
 
 // Configure React Query client with resilient defaults
 const queryClient = new QueryClient({
@@ -26,18 +25,22 @@ const queryClient = new QueryClient({
 });
 
 export default function App() {
-  const [activeView, setActiveView] = useState('command-center');
+  const [activeView, setActiveView] = useState('landing');
 
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ChatbotProvider>
-          <DashboardLayout
-            activeView={activeView}
-            onViewChange={setActiveView}
-          >
-            <DashboardPage activeView={activeView} />
-          </DashboardLayout>
+          {activeView === 'landing' ? (
+            <LandingPage onLaunchApp={() => setActiveView('command-center')} />
+          ) : (
+            <DashboardLayout
+              activeView={activeView}
+              onViewChange={setActiveView}
+            >
+              <DashboardPage activeView={activeView} />
+            </DashboardLayout>
+          )}
         </ChatbotProvider>
       </AuthProvider>
     </QueryClientProvider>

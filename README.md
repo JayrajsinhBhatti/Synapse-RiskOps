@@ -156,17 +156,17 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Backend (Java)**
-```bash
-cd backend
-./mvnw spring-boot:run
-```
+cd e:\Users\Jayraj\synapse-riskops\backend
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+
 
 **Frontend (React)**
-```bash
-cd frontend
+cd e:\Users\Jayraj\synapse-riskops\frontend
 npm install
 npm run dev
-```
 
 ---
 

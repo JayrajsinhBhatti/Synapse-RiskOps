@@ -16,11 +16,16 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
-      // Proxy other API calls to Spring Boot backend during development
+      // Proxy other API calls to Spring Boot / FastAPI backend during development
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            // Silently suppress ECONNREFUSED logs while backend/stream is offline
+          });
+        },
       },
     },
   },
