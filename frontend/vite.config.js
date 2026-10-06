@@ -12,13 +12,13 @@ export default defineConfig({
     proxy: {
       // Proxy Chatbot API calls to GenAI Agent (port 8001)
       '/api/chatbot': {
-        target: 'http://localhost:8001',
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
         secure: false,
       },
-      // Proxy other API calls to Spring Boot / FastAPI backend during development
+      // Proxy other API calls to FastAPI backend during development
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://127.0.0.1:8080',
         changeOrigin: true,
         secure: false,
         configure: (proxy, _options) => {

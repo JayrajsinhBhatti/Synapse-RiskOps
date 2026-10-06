@@ -98,14 +98,14 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Activity className="w-5 h-5 text-indigo-400" />
-          <h2 className="text-base font-bold text-white tracking-wide">
+          <Activity className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
+          <h2 className="text-base font-bold dark:text-white text-slate-900 tracking-wide">
             Microservice Risk Scoreboard
           </h2>
         </div>
         <button
           onClick={() => refetchRisk()}
-          className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+          className="p-1.5 rounded-lg dark:bg-slate-800/80 bg-white dark:hover:bg-slate-700 hover:bg-slate-100 dark:text-slate-400 text-slate-600 dark:hover:text-white hover:text-slate-950 border dark:border-transparent border-slate-200 shadow-sm transition-colors"
           title="Refresh Risk Assessments"
         >
           <RefreshCw className="w-4 h-4" />
@@ -114,36 +114,36 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
 
       {/* Metric Cards Row */}
       <div className="grid grid-cols-4 gap-2.5 mb-5">
-        <div className="bg-slate-800/50 border border-slate-700/60 rounded-xl p-3 flex flex-col">
-          <span className="text-[11px] font-medium text-slate-400">Avg Risk Index</span>
-          <span className="text-xl font-bold text-white mt-0.5">{stats.avg}</span>
-          <span className="text-[10px] text-slate-500 mt-1">Scale 0.0 - 1.0</span>
+        <div className="dark:bg-slate-800/50 bg-slate-50 border dark:border-slate-700/60 border-slate-200 rounded-xl p-3 flex flex-col shadow-sm">
+          <span className="text-[11px] font-semibold dark:text-slate-400 text-slate-500">Avg Risk Index</span>
+          <span className="text-xl font-bold dark:text-white text-slate-900 mt-0.5">{stats.avg}</span>
+          <span className="text-[10px] dark:text-slate-500 text-slate-400 mt-1">Scale 0.0 - 1.0</span>
         </div>
-        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex flex-col">
-          <span className="text-[11px] font-medium text-emerald-400 flex items-center gap-1">
+        <div className="dark:bg-emerald-500/10 bg-emerald-50 border dark:border-emerald-500/20 border-emerald-200 rounded-xl p-3 flex flex-col shadow-sm">
+          <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
             <ShieldCheck className="w-3 h-3" /> Healthy
           </span>
-          <span className="text-xl font-bold text-emerald-300 mt-0.5">{stats.healthy}</span>
-          <span className="text-[10px] text-emerald-400/60 mt-1">&lt; 0.40 Safe</span>
+          <span className="text-xl font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{stats.healthy}</span>
+          <span className="text-[10px] text-emerald-600/70 dark:text-emerald-400/60 mt-1">&lt; 0.40 Safe</span>
         </div>
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 flex flex-col">
-          <span className="text-[11px] font-medium text-amber-400 flex items-center gap-1">
+        <div className="dark:bg-amber-500/10 bg-amber-50 border dark:border-amber-500/20 border-amber-200 rounded-xl p-3 flex flex-col shadow-sm">
+          <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1">
             <AlertTriangle className="w-3 h-3" /> Watch
           </span>
-          <span className="text-xl font-bold text-amber-300 mt-0.5">{stats.watch}</span>
-          <span className="text-[10px] text-amber-400/60 mt-1">0.40 - 0.69</span>
+          <span className="text-xl font-bold text-amber-700 dark:text-amber-300 mt-0.5">{stats.watch}</span>
+          <span className="text-[10px] text-amber-600/70 dark:text-amber-400/60 mt-1">0.40 - 0.69</span>
         </div>
-        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex flex-col">
-          <span className="text-[11px] font-medium text-red-400 flex items-center gap-1">
+        <div className="dark:bg-red-500/10 bg-red-50 border dark:border-red-500/20 border-red-200 rounded-xl p-3 flex flex-col shadow-sm">
+          <span className="text-[11px] font-semibold text-red-600 dark:text-red-400 flex items-center gap-1">
             <Flame className="w-3 h-3" /> Critical
           </span>
-          <span className="text-xl font-bold text-red-300 mt-0.5">{stats.critical}</span>
-          <span className="text-[10px] text-red-400/60 mt-1">&ge; 0.70 Alert</span>
+          <span className="text-xl font-bold text-red-700 dark:text-red-300 mt-0.5">{stats.critical}</span>
+          <span className="text-[10px] text-red-600/70 dark:text-red-400/60 mt-1">&ge; 0.70 Alert</span>
         </div>
       </div>
 
       {/* Chart Section */}
-      <div className="flex-1 min-h-[220px] w-full bg-slate-900/60 rounded-xl p-2 border border-slate-800/80 mb-4">
+      <div className="flex-1 min-h-[220px] w-full dark:bg-slate-900/60 bg-slate-50/60 rounded-xl p-2 border dark:border-slate-800/80 border-slate-200 mb-4 shadow-sm">
         {chartData.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-500 text-xs">
             Loading service risk metrics...

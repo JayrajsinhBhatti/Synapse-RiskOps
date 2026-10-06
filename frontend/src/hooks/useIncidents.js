@@ -96,6 +96,18 @@ export function useLatestRisk() {
 }
 
 /**
+ * Hook to fetch historical risk assessment records.
+ */
+export function useRiskAssessments(params = {}) {
+  return useQuery({
+    queryKey: ['risk-assessments', params],
+    queryFn: () => getRiskAssessments(params),
+    enabled: hasAuthToken(),
+    staleTime: 30000,
+  });
+}
+
+/**
  * Hook to mutate/update incident status.
  */
 export function useUpdateIncidentStatus() {

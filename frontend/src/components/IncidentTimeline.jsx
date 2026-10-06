@@ -116,21 +116,21 @@ export default function IncidentTimeline({
   return (
     <div className="glass-card flex flex-col h-full overflow-hidden">
       {/* Header & Controls */}
-      <div className="p-4 border-b border-white/10 space-y-3 bg-slate-900/40">
+      <div className="p-4 border-b dark:border-white/10 border-slate-200 space-y-3 dark:bg-slate-900/40 bg-slate-50/90">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <ShieldAlert className="w-5 h-5 text-rose-400" />
-            <h2 className="text-base font-bold text-white tracking-wide">
+            <ShieldAlert className="w-5 h-5 text-rose-500 dark:text-rose-400" />
+            <h2 className="text-base font-bold dark:text-white text-slate-900 tracking-wide">
               Incident Feed & Audit History
             </h2>
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full dark:bg-slate-800 bg-slate-200 dark:text-slate-300 text-slate-700 border dark:border-slate-700 border-slate-300">
               {filteredIncidents.length}
             </span>
           </div>
 
           <button
             onClick={() => refetch()}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+            className="p-1.5 rounded-lg dark:bg-slate-800 bg-white dark:hover:bg-slate-700 hover:bg-slate-100 dark:text-slate-400 text-slate-600 dark:hover:text-white hover:text-slate-950 border dark:border-transparent border-slate-200 shadow-sm transition-colors"
             title="Refresh Feed"
           >
             <RefreshCw className="w-4 h-4" />
@@ -140,13 +140,13 @@ export default function IncidentTimeline({
         {/* Search & Filters */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
             <input
               type="text"
               placeholder="Search incidents or services..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-synapse-500"
+              className="w-full pl-8 pr-3 py-1.5 dark:bg-slate-950/60 bg-white border dark:border-slate-800 border-slate-300 rounded-lg text-xs dark:text-white text-slate-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
@@ -154,7 +154,7 @@ export default function IncidentTimeline({
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-synapse-500"
+            className="dark:bg-slate-950/60 bg-white border dark:border-slate-800 border-slate-300 rounded-lg px-2.5 py-1.5 text-xs dark:text-slate-300 text-slate-700 focus:outline-none focus:border-indigo-500"
           >
             <option value="ALL">All Status</option>
             <option value="OPEN">Open</option>
@@ -167,7 +167,7 @@ export default function IncidentTimeline({
           <select
             value={severityFilter}
             onChange={(e) => setSeverityFilter(e.target.value)}
-            className="bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-synapse-500"
+            className="dark:bg-slate-950/60 bg-white border dark:border-slate-800 border-slate-300 rounded-lg px-2.5 py-1.5 text-xs dark:text-slate-300 text-slate-700 focus:outline-none focus:border-indigo-500"
           >
             <option value="ALL">All Severities</option>
             <option value="CRITICAL">Critical</option>
@@ -205,8 +205,8 @@ export default function IncidentTimeline({
                 }}
                 className={`rounded-xl border p-3.5 transition-all cursor-pointer ${
                   isSelected
-                    ? 'bg-slate-800/90 border-synapse-500 shadow-lg shadow-synapse-500/15'
-                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
+                    ? 'dark:bg-slate-800/90 bg-indigo-50/80 border-indigo-500 shadow-md shadow-indigo-500/10'
+                    : 'dark:bg-slate-900/60 bg-white border dark:border-slate-800 border-slate-200 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40 shadow-sm'
                 }`}
               >
                 {/* Top Row: Severity, Status, Service, Time */}
@@ -226,33 +226,33 @@ export default function IncidentTimeline({
                       {statusBadge.label}
                     </span>
 
-                    <span className="text-[10px] text-slate-300 font-semibold px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+                    <span className="text-[10px] dark:text-slate-300 text-slate-700 font-semibold px-2 py-0.5 rounded dark:bg-slate-800 bg-slate-100 border dark:border-slate-700 border-slate-200">
                       {serviceFriendlyName}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                  <div className="flex items-center gap-1 text-[11px] dark:text-slate-400 text-slate-500">
                     <Clock className="w-3 h-3" />
                     <span>{formatTimeAgo(inc.created_at || inc.detected_at)}</span>
                   </div>
                 </div>
 
                 {/* Title & Description */}
-                <h3 className="text-xs font-bold text-white mb-1 leading-snug">
+                <h3 className="text-xs font-bold dark:text-white text-slate-900 mb-1 leading-snug">
                   {inc.title}
                 </h3>
-                <p className="text-[11px] text-slate-400 line-clamp-2 mb-3">
+                <p className="text-[11px] dark:text-slate-400 text-slate-600 line-clamp-2 mb-3">
                   {inc.description}
                 </p>
 
                 {/* Bottom Row: Actions & Audit Toggle */}
-                <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px]">
+                <div className="flex items-center justify-between pt-2 border-t dark:border-slate-800/80 border-slate-200 text-[11px]">
                   <div className="flex items-center gap-3">
                     {inc.status === 'OPEN' && (
                       <button
                         onClick={(e) => handleAcknowledge(e, inc)}
                         disabled={updateStatusMutation.isPending}
-                        className="px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-medium border border-amber-500/30 transition-colors"
+                        className="px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-600 dark:text-amber-300 font-medium border border-amber-500/30 transition-colors"
                       >
                         Acknowledge
                       </button>
@@ -276,14 +276,14 @@ export default function IncidentTimeline({
                       <button
                         onClick={(e) => handleResolve(e, inc)}
                         disabled={updateStatusMutation.isPending}
-                        className="px-2.5 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-medium border border-emerald-500/30 transition-colors"
+                        className="px-2.5 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-600 dark:text-emerald-300 font-medium border border-emerald-500/30 transition-colors"
                       >
                         Verify & Resolve
                       </button>
                     )}
 
                     {inc.resolved_at && (
-                      <span className="text-emerald-400 text-[10px] font-mono">
+                      <span className="text-emerald-600 dark:text-emerald-400 text-[10px] font-mono">
                         Resolved
                       </span>
                     )}
@@ -292,7 +292,7 @@ export default function IncidentTimeline({
                   {/* Audit Trail Expand Toggle */}
                   <button
                     onClick={(e) => toggleExpand(e, inc.id)}
-                    className="text-slate-400 hover:text-white flex items-center gap-0.5 text-[10px]"
+                    className="dark:text-slate-400 text-slate-500 dark:hover:text-white hover:text-slate-900 flex items-center gap-0.5 text-[10px]"
                   >
                     <span>Audit Trail</span>
                     {isExpanded ? (
@@ -305,8 +305,8 @@ export default function IncidentTimeline({
 
                 {/* Expanded Audit Trail Drawer */}
                 {isExpanded && (
-                  <div className="mt-3 pt-3 border-t border-slate-800 space-y-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  <div className="mt-3 pt-3 border-t dark:border-slate-800 border-slate-200 space-y-2">
+                    <span className="text-[10px] font-bold dark:text-slate-400 text-slate-500 uppercase tracking-wider block">
                       Chronological State Transitions
                     </span>
                     {(!inc.history || inc.history.length === 0) ? (
@@ -317,15 +317,15 @@ export default function IncidentTimeline({
                       inc.history.map((hist, idx) => (
                         <div
                           key={idx}
-                          className="p-2 rounded-lg bg-slate-950/60 border border-slate-800 text-[10px] space-y-1"
+                          className="p-2 rounded-lg dark:bg-slate-950/60 bg-slate-50 border dark:border-slate-800 border-slate-200 text-[10px] space-y-1"
                         >
-                          <div className="flex items-center justify-between text-slate-400">
-                            <span className="font-semibold text-slate-300">
+                          <div className="flex items-center justify-between dark:text-slate-400 text-slate-600">
+                            <span className="font-semibold dark:text-slate-300 text-slate-800">
                               {hist.action || 'MUTATION'}: {hist.old_value || 'OPEN'} <ArrowRight className="w-2.5 h-2.5 inline mx-1" /> {hist.new_value || hist.action}
                             </span>
                             <span>{formatTimestamp(hist.changed_at || hist.timestamp)}</span>
                           </div>
-                          <div className="text-slate-500 text-[9px]">
+                          <div className="text-slate-400 text-[9px]">
                             Actor: {hist.changed_by || 'Autonomous Orchestrator'}
                           </div>
                         </div>

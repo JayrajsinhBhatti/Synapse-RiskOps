@@ -24,8 +24,8 @@ export default function MessageList({ messages = [], onSelectPrompt, isLoading =
             </svg>
           </div>
           <div>
-            <h4 className="text-sm font-semibold text-white">Synapse RiskOps Co-Pilot</h4>
-            <p className="text-xs text-gray-400 mt-1 max-w-xs mx-auto">
+            <h4 className="text-sm font-semibold dark:text-white text-slate-900">Synapse RiskOps Co-Pilot</h4>
+            <p className="text-xs dark:text-gray-400 text-slate-600 mt-1 max-w-xs mx-auto">
               Ask about any microservice’s health, risk score, failure predictions, or metrics.
             </p>
           </div>
@@ -39,7 +39,7 @@ export default function MessageList({ messages = [], onSelectPrompt, isLoading =
               <button
                 key={chip}
                 onClick={() => onSelectPrompt?.(chip)}
-                className="text-[11px] px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/15 text-cyan-300 border border-white/10 transition-colors"
+                className="text-[11px] px-2.5 py-1 rounded-full dark:bg-white/5 bg-slate-100 hover:bg-slate-200 dark:hover:bg-white/15 text-cyan-700 dark:text-cyan-300 border dark:border-white/10 border-slate-200 transition-colors"
               >
                 {chip}
               </button>
@@ -55,7 +55,7 @@ export default function MessageList({ messages = [], onSelectPrompt, isLoading =
             key={msg.id || idx}
             className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1.5`}
           >
-            <div className="flex items-center gap-1.5 text-[11px] text-gray-400 px-1">
+            <div className="flex items-center gap-1.5 text-[11px] dark:text-gray-400 text-slate-500 px-1">
               <span>{isUser ? 'You' : 'Ops Co-Pilot'}</span>
             </div>
 
@@ -63,7 +63,7 @@ export default function MessageList({ messages = [], onSelectPrompt, isLoading =
               className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 shadow-md ${
                 isUser
                   ? 'bg-cyan-600 text-white rounded-br-xs'
-                  : 'bg-white/10 text-gray-100 border border-white/10 rounded-bl-xs'
+                  : 'dark:bg-white/10 bg-slate-100 dark:text-gray-100 text-slate-800 border dark:border-white/10 border-slate-200 rounded-bl-xs'
               }`}
             >
               <div className="whitespace-pre-line leading-relaxed text-xs">

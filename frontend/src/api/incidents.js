@@ -29,11 +29,9 @@ export async function getIncidentById(incidentId) {
 /**
  * Update the status of an incident (open, investigating, mitigated, resolved).
  */
-export async function updateIncidentStatus(incidentId, { status, comment, executed_actions = [] }) {
-  return apiClient.patch(`/incidents/${incidentId}/status`, {
+export async function updateIncidentStatus(incidentId, { status }) {
+  return apiClient.patch(`/incidents/${incidentId}`, {
     status,
-    comment,
-    executed_actions,
   });
 }
 

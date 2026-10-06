@@ -24,7 +24,7 @@ export default function MessageInput({ onSendMessage, disabled = false }) {
   };
 
   return (
-    <div className="p-3 border-t border-white/10 bg-black/30 backdrop-blur-md">
+    <div className="p-3 border-t dark:border-white/10 border-slate-200 dark:bg-black/30 bg-slate-50 backdrop-blur-md">
       <form onSubmit={handleSubmit} className="flex items-center gap-2">
         <input
           type="text"
@@ -33,7 +33,7 @@ export default function MessageInput({ onSendMessage, disabled = false }) {
           onKeyDown={handleKeyDown}
           placeholder="Ask e.g. How is payment-service doing?"
           disabled={disabled}
-          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors disabled:opacity-50"
+          className="flex-1 dark:bg-white/5 bg-white border dark:border-white/10 border-slate-300 rounded-xl px-3.5 py-2 text-xs dark:text-white text-slate-900 placeholder:text-slate-400 dark:placeholder-gray-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors disabled:opacity-50"
         />
         <button
           type="submit"

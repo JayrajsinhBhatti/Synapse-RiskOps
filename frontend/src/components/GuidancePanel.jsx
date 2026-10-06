@@ -45,12 +45,12 @@ export default function GuidancePanel({ incident, onClose }) {
 
   if (!incident) {
     return (
-      <div className="glass-card p-6 flex flex-col items-center justify-center text-center h-full text-slate-400">
-        <Brain className="w-12 h-12 text-synapse-500/50 mb-3" />
-        <h3 className="text-base font-bold text-white mb-1">
+      <div className="glass-card p-6 flex flex-col items-center justify-center text-center h-full dark:text-slate-400 text-slate-500">
+        <Brain className="w-12 h-12 text-indigo-500/50 mb-3" />
+        <h3 className="text-base font-bold dark:text-white text-slate-900 mb-1">
           No Incident Selected
         </h3>
-        <p className="text-xs max-w-xs text-slate-400">
+        <p className="text-xs max-w-xs dark:text-slate-400 text-slate-500">
           Select an incident from the Incident Feed to inspect AI-generated root cause diagnosis,
           confidence score, and execute automated remediation playbooks.
         </p>
@@ -67,10 +67,10 @@ export default function GuidancePanel({ incident, onClose }) {
   const confidenceScore = incident.confidence ? Number(incident.confidence) : 0.94;
   const confidenceTier =
     confidenceScore >= 0.85
-      ? { label: 'Tier 1 — Autonomous Execution Approved', color: 'text-emerald-400', bg: 'bg-emerald-500/10' }
+      ? { label: 'Tier 1 — Autonomous Execution Approved', color: 'text-emerald-500 dark:text-emerald-400', bg: 'bg-emerald-500/10' }
       : confidenceScore >= 0.60
-      ? { label: 'Tier 2 — Supervised SRE Approval Required', color: 'text-amber-400', bg: 'bg-amber-500/10' }
-      : { label: 'Tier 3 — Manual Incident Escalation', color: 'text-rose-400', bg: 'bg-rose-500/10' };
+      ? { label: 'Tier 2 — Supervised SRE Approval Required', color: 'text-amber-500 dark:text-amber-400', bg: 'bg-amber-500/10' }
+      : { label: 'Tier 3 — Manual Incident Escalation', color: 'text-rose-500 dark:text-rose-400', bg: 'bg-rose-500/10' };
 
   const playbookName =
     failureType === 'HIGH_CPU'
@@ -136,17 +136,17 @@ export default function GuidancePanel({ incident, onClose }) {
   return (
     <div className="glass-card flex flex-col h-full overflow-hidden">
       {/* Panel Header */}
-      <div className="p-4 border-b border-white/10 bg-slate-900/50 flex items-center justify-between">
+      <div className="p-4 border-b dark:border-white/10 border-slate-200 dark:bg-slate-900/50 bg-slate-50/90 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Brain className="w-5 h-5 text-synapse-400" />
-          <h2 className="text-base font-bold text-white tracking-wide">
+          <Brain className="w-5 h-5 text-indigo-600 dark:text-synapse-400" />
+          <h2 className="text-base font-bold dark:text-white text-slate-900 tracking-wide">
             AI Guidance & Remediation Co-Pilot
           </h2>
         </div>
         {onClose && (
           <button
             onClick={onClose}
-            className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded bg-slate-800"
+            className="text-xs dark:text-slate-400 text-slate-500 dark:hover:text-white hover:text-slate-900 px-2 py-1 rounded dark:bg-slate-800 bg-white border dark:border-transparent border-slate-200"
           >
             Close
           </button>
@@ -155,7 +155,7 @@ export default function GuidancePanel({ incident, onClose }) {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Selected Incident Context Header */}
-        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+        <div className="p-3.5 rounded-xl dark:bg-slate-900/80 bg-slate-50 border dark:border-slate-800 border-slate-200 space-y-2 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span
@@ -168,35 +168,35 @@ export default function GuidancePanel({ incident, onClose }) {
               >
                 {statusBadge.label}
               </span>
-              <span className="text-xs font-mono font-bold text-indigo-300">
+              <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-300">
                 {serviceFriendlyName}
               </span>
             </div>
-            <span className="text-[10px] font-mono text-slate-500">
+            <span className="text-[10px] font-mono text-slate-400">
               ID: {incident.id.slice(0, 8)}...
             </span>
           </div>
 
-          <h3 className="text-sm font-bold text-white">{incident.title}</h3>
-          <p className="text-xs text-slate-300 leading-relaxed">{incident.description}</p>
+          <h3 className="text-sm font-bold dark:text-white text-slate-900">{incident.title}</h3>
+          <p className="text-xs dark:text-slate-300 text-slate-600 leading-relaxed">{incident.description}</p>
         </div>
 
         {/* AI Root Cause Hypothesis */}
-        <div className="p-3.5 rounded-xl bg-indigo-950/20 border border-indigo-500/20 space-y-2">
-          <div className="flex items-center gap-2 text-indigo-300 text-xs font-bold uppercase tracking-wider">
-            <ShieldCheck className="w-4 h-4 text-indigo-400" />
+        <div className="p-3.5 rounded-xl dark:bg-indigo-950/20 bg-indigo-50/80 border dark:border-indigo-500/20 border-indigo-200 space-y-2 shadow-sm">
+          <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300 text-xs font-bold uppercase tracking-wider">
+            <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
             <span>Root Cause Hypothesis</span>
           </div>
-          <p className="text-xs text-slate-200 leading-relaxed">
+          <p className="text-xs dark:text-slate-200 text-slate-700 leading-relaxed">
             High correlation between telemetry anomaly rate (92%) and queue backlog. Downstream
             saturation detected on dependent databases with elevated socket timeouts.
           </p>
 
           {/* Confidence Score Pill */}
-          <div className="pt-2 flex items-center justify-between border-t border-indigo-500/20 text-xs">
-            <span className="text-slate-400">Diagnosis Confidence</span>
+          <div className="pt-2 flex items-center justify-between border-t dark:border-indigo-500/20 border-indigo-200 text-xs">
+            <span className="dark:text-slate-400 text-slate-500">Diagnosis Confidence</span>
             <div className="flex items-center gap-2">
-              <span className="font-mono font-bold text-emerald-400">
+              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
                 {(confidenceScore * 100).toFixed(1)}%
               </span>
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${confidenceTier.bg} ${confidenceTier.color}`}>
@@ -207,22 +207,22 @@ export default function GuidancePanel({ incident, onClose }) {
         </div>
 
         {/* Recommended Remediation Action */}
-        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2.5">
+        <div className="p-3.5 rounded-xl dark:bg-slate-900/80 bg-slate-50 border dark:border-slate-800 border-slate-200 space-y-2.5 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-synapse-400" />
+            <span className="text-xs font-bold dark:text-slate-300 text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <Layers className="w-4 h-4 text-indigo-600 dark:text-synapse-400" />
               Remediation Action Plan
             </span>
-            <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+            <span className="text-[10px] font-mono text-amber-700 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
               Ansible Automated
             </span>
           </div>
 
-          <div className="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 space-y-1">
-            <div className="text-slate-500"># Recommended Ansible Playbook</div>
-            <div className="text-synapse-300 font-semibold">{playbookName}</div>
-            <div className="text-slate-500 pt-1"># Action parameters</div>
-            <div className="text-slate-400">service: {serviceFriendlyName} | replicas: 4 | timeout: 60s</div>
+          <div className="dark:bg-slate-950/70 bg-white p-2.5 rounded-lg border dark:border-slate-800 border-slate-200 font-mono text-[11px] space-y-1 shadow-inner">
+            <div className="dark:text-slate-500 text-slate-400"># Recommended Ansible Playbook</div>
+            <div className="text-indigo-600 dark:text-synapse-300 font-semibold">{playbookName}</div>
+            <div className="dark:text-slate-500 text-slate-400 pt-1"># Action parameters</div>
+            <div className="dark:text-slate-400 text-slate-600">service: {serviceFriendlyName} | replicas: 4 | timeout: 60s</div>
           </div>
 
           {/* Execute Button */}

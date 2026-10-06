@@ -80,27 +80,27 @@ export default function SimulateAlertModal({ isOpen, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl p-6 text-slate-100">
+      <div className="relative w-full max-w-lg rounded-2xl dark:bg-slate-900 bg-white border dark:border-slate-700 border-slate-200 shadow-2xl p-6 dark:text-slate-100 text-slate-900 transition-colors">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+          className="absolute top-4 right-4 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
 
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-500 dark:text-amber-400">
             <Zap className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white">Simulate Anomaly / Alert</h2>
-            <p className="text-xs text-slate-400">Inject an incident to test real-time SSE and remediation</p>
+            <h2 className="text-xl font-bold dark:text-white text-slate-900">Simulate Anomaly / Alert</h2>
+            <p className="text-xs dark:text-slate-400 text-slate-500">Inject an incident to test real-time SSE and remediation</p>
           </div>
         </div>
 
         {/* Presets */}
         <div className="mb-4">
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 block">
+          <label className="text-xs font-semibold dark:text-slate-400 text-slate-500 uppercase tracking-wider mb-2 block">
             Select Failure Scenario Preset
           </label>
           <div className="space-y-2">
@@ -111,16 +111,16 @@ export default function SimulateAlertModal({ isOpen, onClose }) {
                 onClick={() => handleApplyPreset(p)}
                 className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all flex items-center justify-between ${
                   title === p.title
-                    ? 'bg-synapse-500/20 border-synapse-500/50 text-white shadow-sm'
-                    : 'bg-slate-800/40 border-slate-700/60 text-slate-300 hover:bg-slate-800'
+                    ? 'dark:bg-synapse-500/20 bg-indigo-50 border-indigo-500 dark:border-synapse-500/50 dark:text-white text-indigo-900 shadow-sm font-semibold'
+                    : 'dark:bg-slate-800/40 bg-slate-50 border-slate-200 dark:border-slate-700/60 dark:text-slate-300 text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
                 <div>
-                  <div className="font-semibold text-slate-200">{p.title}</div>
-                  <div className="text-[11px] text-slate-400">{p.service_id} • {p.failure_type}</div>
+                  <div className="font-semibold dark:text-slate-200 text-slate-800">{p.title}</div>
+                  <div className="text-[11px] dark:text-slate-400 text-slate-500">{p.service_id} • {p.failure_type}</div>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  p.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300'
+                  p.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-600 dark:text-red-300' : 'bg-amber-500/20 text-amber-600 dark:text-amber-300'
                 }`}>
                   {p.severity}
                 </span>
@@ -130,8 +130,8 @@ export default function SimulateAlertModal({ isOpen, onClose }) {
         </div>
 
         {successMsg && (
-          <div className="mb-4 p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
-            <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+          <div className="mb-4 p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-600 dark:text-emerald-300 text-xs flex items-center gap-2">
+            <Check className="w-4 h-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
             <span>{successMsg}</span>
           </div>
         )}
@@ -139,21 +139,21 @@ export default function SimulateAlertModal({ isOpen, onClose }) {
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-300 font-medium block mb-1">Target Service</label>
+              <label className="text-xs dark:text-slate-300 text-slate-700 font-medium block mb-1">Target Service</label>
               <input
                 type="text"
                 required
                 value={selectedService}
                 onChange={(e) => setSelectedService(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white"
+                className="w-full px-3 py-1.5 dark:bg-slate-800 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-lg text-xs dark:text-white text-slate-900 focus:outline-none focus:border-indigo-500"
               />
             </div>
             <div>
-              <label className="text-xs text-slate-300 font-medium block mb-1">Severity</label>
+              <label className="text-xs dark:text-slate-300 text-slate-700 font-medium block mb-1">Severity</label>
               <select
                 value={selectedSeverity}
                 onChange={(e) => setSelectedSeverity(e.target.value)}
-                className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white"
+                className="w-full px-3 py-1.5 dark:bg-slate-800 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-lg text-xs dark:text-white text-slate-900 focus:outline-none focus:border-indigo-500"
               >
                 <option value="LOW">LOW</option>
                 <option value="MEDIUM">MEDIUM</option>
@@ -164,23 +164,23 @@ export default function SimulateAlertModal({ isOpen, onClose }) {
           </div>
 
           <div>
-            <label className="text-xs text-slate-300 font-medium block mb-1">Incident Title</label>
+            <label className="text-xs dark:text-slate-300 text-slate-700 font-medium block mb-1">Incident Title</label>
             <input
               type="text"
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white"
+              className="w-full px-3 py-1.5 dark:bg-slate-800 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-lg text-xs dark:text-white text-slate-900 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
           <div>
-            <label className="text-xs text-slate-300 font-medium block mb-1">Description</label>
+            <label className="text-xs dark:text-slate-300 text-slate-700 font-medium block mb-1">Description</label>
             <textarea
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white resize-none"
+              className="w-full px-3 py-1.5 dark:bg-slate-800 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-lg text-xs dark:text-white text-slate-900 resize-none focus:outline-none focus:border-indigo-500"
             />
           </div>
 
@@ -188,7 +188,7 @@ export default function SimulateAlertModal({ isOpen, onClose }) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+              className="px-4 py-2 rounded-xl dark:bg-slate-800 bg-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs dark:text-slate-300 text-slate-700 border border-slate-200 dark:border-transparent transition-colors"
             >
               Cancel
             </button>
