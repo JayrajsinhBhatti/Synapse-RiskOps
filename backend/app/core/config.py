@@ -6,6 +6,7 @@ Owner: Person 2 | Week: 5
 Centralized configuration settings loaded from environment variables.
 """
 
+from pathlib import Path
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -37,8 +38,15 @@ class Settings(BaseSettings):
     JWT_EXPIRATION_MINUTES: int = 1440  # 24 hours
 
     # Inter-Service Communication URLs
-    ML_ENGINE_URL: str = "http://ml-engine:8000"
-    GENAI_AGENT_URL: str = "http://genai-agent:8001"
+    ML_ENGINE_URL: str = (
+        "http://ml-engine:8000" if Path("/.dockerenv").exists() else "http://localhost:8000"
+    )
+    GENAI_AGENT_URL: str = (
+        "http://genai-agent:8001" if Path("/.dockerenv").exists() else "http://localhost:8001"
+    )
+    N8N_WEBHOOK_URL: str = (
+        "http://n8n:5678/webhook/riskops-incident" if Path("/.dockerenv").exists() else "http://localhost:5678/webhook/riskops-incident"
+    )
 
     # CORS Origins
     CORS_ORIGINS: List[str] = [

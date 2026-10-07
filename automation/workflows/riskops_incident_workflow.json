@@ -1,0 +1,306 @@
+{
+  "id": "riskops123456789",
+  "name": "Synapse - RiskOps Incident Workflow",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "riskops-incident",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        0
+      ],
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "RiskOps Webhook",
+      "webhookId": "a1b2c3d4-0001-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.item.json.body || $input.item.json;\n\nconst incident_id = body.incident_id;\nconst service = body.service || body.service_name;\nconst severity = body.severity;\nconst risk_score = body.risk_score !== undefined && body.risk_score !== null ? Number(body.risk_score) : null;\nconst timestamp = body.timestamp;\nconst confidence = body.confidence !== undefined && body.confidence !== null ? Number(body.confidence) : null;\nconst routing_decision = body.routing_decision;\n\n// Minimum required fields per Section 7.5\nconst missing = [];\nif (!incident_id) missing.push('incident_id');\nif (!service) missing.push('service');\nif (!severity) missing.push('severity');\nif (risk_score === null || isNaN(risk_score)) missing.push('risk_score');\nif (!timestamp) missing.push('timestamp');\nif (confidence === null || isNaN(confidence)) missing.push('confidence');\nif (!routing_decision) missing.push('routing_decision');\n\nif (missing.length > 0) {\n  return {\n    json: {\n      valid: false,\n      error: `Validation failed: missing required fields [${missing.join(', ')}]`,\n      incident_id: incident_id || null,\n      service: service || null,\n      status: 'REJECTED_INVALID_PAYLOAD',\n      timestamp: new Date().toISOString()\n    }\n  };\n}\n\nconst status = body.status || (severity === 'CRITICAL' ? 'OPEN' : 'NORMAL');\nconst is_recovery = (body.status === 'RESOLVED') || (severity.toUpperCase() === 'HEALTHY') || (risk_score < 40.0 && body.status === 'RESOLVED');\n\nreturn {\n  json: {\n    valid: true,\n    incident_id,\n    service,\n    severity: severity.toUpperCase(),\n    risk_score,\n    risk_tier: body.risk_tier || severity,\n    predicted_failure: body.predicted_failure || body.predicted_failure_type || 'latency_degradation',\n    anomaly_score: body.anomaly_score !== undefined && body.anomaly_score !== null ? Number(body.anomaly_score) : null,\n    forecast_risk: body.forecast_risk !== undefined && body.forecast_risk !== null ? Number(body.forecast_risk) : null,\n    root_cause: body.root_cause || body.predicted_root_cause_service || service,\n    affected_services: Array.isArray(body.affected_services) ? body.affected_services : [service],\n    confidence,\n    routing_decision,\n    guidance: body.guidance || 'Investigate telemetry anomalies',\n    status,\n    is_recovery,\n    timestamp\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -360,
+        0
+      ],
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Validate & Parse Incident"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -120,
+        0
+      ],
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Is Payload Valid?"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"status\": \"SAFE_FAILURE_INVALID_PAYLOAD\",\n  \"error\": \"{{ $json.error }}\",\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\",\n  \"remediation_action\": \"NONE_REJECTED\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        120,
+        180
+      ],
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Safe Failure Log"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-rec",
+              "leftValue": "={{ $json.is_recovery }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        120,
+        -80
+      ],
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Is Recovery?"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"status\": \"RESOLVED\",\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service\": \"{{ $json.service }}\",\n  \"action\": \"STOP_FURTHER_REMEDIATION\",\n  \"message\": \"Service recovered. Telemetry normalized. Incident closed.\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        360,
+        -200
+      ],
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Stop Remediation On Recovery"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-crit",
+              "leftValue": "={{ $json.severity }}",
+              "rightValue": "CRITICAL",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        360,
+        20
+      ],
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Check Severity CRITICAL?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item.json;\nconst notification_text = `Synapse RiskOps Incident\\n\\nService: ${item.service}\\nSeverity: ${item.severity}\\nRisk Score: ${item.risk_score}\\nRoot Cause: ${item.root_cause}\\nConfidence: ${item.confidence}\\n\\nRemediation is available.\\n\\nHuman approval required before remediation.`;\n\nreturn {\n  json: {\n    ...item,\n    notification_title: `Synapse RiskOps Incident [${item.severity}]`,\n    notification_message: notification_text,\n    remediation_available: true,\n    human_approval_required: true,\n    approval_status: 'PENDING_HUMAN_APPROVAL',\n    predefined_action: 'REMEDIATE_SERVICE_LATENCY',\n    evaluated_at: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        -40
+      ],
+      "id": "a1b2c3d4-0008-4000-8000-000000000008",
+      "name": "Format Critical Notification & Require Approval"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"status\": \"AWAITING_APPROVAL\",\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service\": \"{{ $json.service }}\",\n  \"severity\": \"{{ $json.severity }}\",\n  \"risk_score\": {{ $json.risk_score }},\n  \"root_cause\": \"{{ $json.root_cause }}\",\n  \"confidence\": {{ $json.confidence }},\n  \"routing_decision\": \"{{ $json.routing_decision }}\",\n  \"remediation_available\": true,\n  \"human_approval_required\": true,\n  \"notification\": \"{{ $json.notification_message }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        840,
+        -40
+      ],
+      "id": "a1b2c3d4-0009-4000-8000-000000000009",
+      "name": "Log Notification & Approval State"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"status\": \"INFO_LOGGED\",\n  \"incident_id\": \"{{ $json.incident_id }}\",\n  \"service\": \"{{ $json.service }}\",\n  \"severity\": \"{{ $json.severity }}\",\n  \"risk_score\": {{ $json.risk_score }},\n  \"routing_decision\": \"{{ $json.routing_decision }}\",\n  \"timestamp\": \"{{ $json.timestamp }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        600,
+        140
+      ],
+      "id": "a1b2c3d4-0010-4000-8000-000000000010",
+      "name": "Log Non-Critical"
+    }
+  ],
+  "connections": {
+    "RiskOps Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate & Parse Incident",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Parse Incident": {
+      "main": [
+        [
+          {
+            "node": "Is Payload Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Payload Valid?": {
+      "main": [
+        [
+          {
+            "node": "Is Recovery?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe Failure Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Recovery?": {
+      "main": [
+        [
+          {
+            "node": "Stop Remediation On Recovery",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Severity CRITICAL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Severity CRITICAL?": {
+      "main": [
+        [
+          {
+            "node": "Format Critical Notification & Require Approval",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Non-Critical",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Critical Notification & Require Approval": {
+      "main": [
+        [
+          {
+            "node": "Log Notification & Approval State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  }
+}

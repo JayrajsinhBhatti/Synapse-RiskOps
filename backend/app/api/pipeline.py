@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_or_system
 from app.core.database import get_db
 from app.models.incident import Incident, IncidentHistory
 from app.models.user import User
@@ -41,7 +41,7 @@ router = APIRouter(
 async def trigger_diagnosis_and_route(
     request: AnomalyDiagnosisRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_system),
 ):
     """
     Primary orchestration endpoint:

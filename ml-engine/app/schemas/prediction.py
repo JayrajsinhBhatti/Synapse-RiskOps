@@ -97,6 +97,7 @@ class AnomalyDetail(BaseModel):
     anomaly_score: float = Field(..., description="Raw anomaly score from Isolation Forest (0-1, higher = more anomalous)")
     is_anomaly: bool = Field(..., description="Whether the score exceeds the anomaly threshold")
     top_contributing_features: List[str] = Field(default_factory=list, description="Features most responsible for the anomaly")
+    guardrail_info: Optional[Dict[str, Any]] = Field(default=None, description="P1-B univariate guardrail activation info")
 
 
 class ForecastDetail(BaseModel):
@@ -131,6 +132,14 @@ class PredictionResponse(BaseModel):
     # Sub-model details
     anomaly_detail: AnomalyDetail
     forecast_detail: ForecastDetail
+
+    # Topology-aware cascade propagation (P2)
+    local_risk_score: Optional[float] = None
+    topology_adjusted_risk_score: Optional[float] = None
+    upstream_incidents: Optional[List[Dict[str, Any]]] = None
+    propagation_contribution: Optional[float] = None
+    dependency_path: Optional[List[str]] = None
+    cascade_depth: Optional[int] = None
 
 
 class BatchPredictionResponse(BaseModel):

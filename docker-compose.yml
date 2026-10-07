@@ -58,6 +58,7 @@ services:
       JWT_EXPIRATION_MINUTES: ${JWT_EXPIRATION_MINUTES:-1440}
       ML_ENGINE_URL: ${ML_ENGINE_URL:-http://ml-engine:8000}
       GENAI_AGENT_URL: ${GENAI_AGENT_URL:-http://genai-agent:8001}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/riskops-incident}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000,http://localhost:8080}
     depends_on:
       postgres:

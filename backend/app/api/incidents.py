@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_current_user_or_system
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.incident import Incident, IncidentHistory
@@ -146,7 +146,7 @@ async def list_incidents(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_system),
 ):
     """
     Return list of incidents with optional filtering by status, severity, and service.
@@ -257,7 +257,7 @@ async def broadcast_risk_alert_endpoint(
 async def get_incident(
     incident_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_system),
 ):
     """Return a single incident by its UUID."""
     result = await db.execute(

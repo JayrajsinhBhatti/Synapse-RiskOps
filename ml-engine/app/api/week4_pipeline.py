@@ -42,36 +42,29 @@ router = APIRouter(
 # REQUEST MODELS
 # =====================================================
 
+from typing import Optional, Dict, Any
+
 class ServiceMetricsRequest(BaseModel):
     """
     Current metrics snapshot for one service.
+    Supports both flat structure and nested {"service_name": ..., "metrics": {...}}.
     """
+    service: Optional[str] = None
+    service_name: Optional[str] = None
+    metrics: Optional[Dict[str, Any]] = None
+    cpu_usage: Optional[float] = None
+    memory_usage: Optional[float] = None
+    disk_io: Optional[float] = None
+    network_latency_ms: Optional[float] = None
+    request_count: Optional[float] = None
+    error_rate: Optional[float] = None
+    response_time_p99: Optional[float] = None
+    active_connections: Optional[float] = None
+    gc_pause_ms: Optional[float] = None
+    thread_count: Optional[float] = None
 
-    service: str = Field(
-        ...,
-        min_length=1,
-        description="Service name",
-    )
-
-    cpu_usage: float
-
-    memory_usage: float
-
-    disk_io: float
-
-    network_latency_ms: float
-
-    request_count: float
-
-    error_rate: float
-
-    response_time_p99: float
-
-    active_connections: float
-
-    gc_pause_ms: float
-
-    thread_count: float
+    class Config:
+        extra = "allow"
 
 
 class RoutingExecutionRequest(BaseModel):
@@ -148,18 +141,35 @@ async def analyze_service(
     # by RiskEngine.score()
     # -------------------------------------------------
 
-    metrics = {
-        "cpu_usage": request.cpu_usage,
-        "memory_usage": request.memory_usage,
-        "disk_io": request.disk_io,
-        "network_latency_ms": request.network_latency_ms,
-        "request_count": request.request_count,
-        "error_rate": request.error_rate,
-        "response_time_p99": request.response_time_p99,
-        "active_connections": request.active_connections,
-        "gc_pause_ms": request.gc_pause_ms,
-        "thread_count": request.thread_count,
-    }
+    target_svc = request.service or request.service_name or "unknown-service"
+
+    if request.metrics and isinstance(request.metrics, dict):
+        m = request.metrics
+        metrics = {
+            "cpu_usage": float(m.get("cpu_usage", 0.0)),
+            "memory_usage": float(m.get("memory_usage", 0.0)),
+            "disk_io": float(m.get("disk_io", 0.0)),
+            "network_latency_ms": float(m.get("network_latency_ms", 0.0)),
+            "request_count": float(m.get("request_count", 0)),
+            "error_rate": float(m.get("error_rate", 0.0)),
+            "response_time_p99": float(m.get("response_time_p99", 0.0)),
+            "active_connections": float(m.get("active_connections", 0)),
+            "gc_pause_ms": float(m.get("gc_pause_ms", 0.0)),
+            "thread_count": float(m.get("thread_count", 0)),
+        }
+    else:
+        metrics = {
+            "cpu_usage": float(request.cpu_usage or 0.0),
+            "memory_usage": float(request.memory_usage or 0.0),
+            "disk_io": float(request.disk_io or 0.0),
+            "network_latency_ms": float(request.network_latency_ms or 0.0),
+            "request_count": float(request.request_count or 0.0),
+            "error_rate": float(request.error_rate or 0.0),
+            "response_time_p99": float(request.response_time_p99 or 0.0),
+            "active_connections": float(request.active_connections or 0.0),
+            "gc_pause_ms": float(request.gc_pause_ms or 0.0),
+            "thread_count": float(request.thread_count or 0.0),
+        }
 
     # -------------------------------------------------
     # Execute ML + Graph analysis
@@ -168,7 +178,7 @@ async def analyze_service(
     try:
 
         result = week4_pipeline.analyze_service(
-            service=request.service,
+            service=target_svc,
             metrics=metrics,
             risk_engine=engine,
         )

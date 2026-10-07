@@ -41,8 +41,34 @@ class OrchestrationService:
         ml_engine_url: Optional[str] = None,
         genai_agent_url: Optional[str] = None,
     ):
-        self.ml_engine_url = ml_engine_url or settings.ML_ENGINE_URL
-        self.genai_agent_url = genai_agent_url or settings.GENAI_AGENT_URL
+        self._ml_engine_url = ml_engine_url
+        self._genai_agent_url = genai_agent_url
+
+    @property
+    def ml_engine_url(self) -> str:
+        return self._ml_engine_url or settings.ML_ENGINE_URL
+
+    @property
+    def genai_agent_url(self) -> str:
+        return self._genai_agent_url or settings.GENAI_AGENT_URL
+
+    @property
+    def n8n_webhook_url(self) -> str:
+        return getattr(settings, "N8N_WEBHOOK_URL", "http://localhost:5678/webhook/riskops-incident")
+
+    async def _send_n8n_incident(self, payload: Dict[str, Any]) -> bool:
+        """Forward incident payload to n8n webhook."""
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.post(self.n8n_webhook_url, json=payload)
+                if resp.status_code in (200, 201):
+                    logger.info(f"Successfully dispatched incident to n8n: {payload.get('incident_id')}")
+                    return True
+                else:
+                    logger.warning(f"n8n webhook returned status {resp.status_code}: {resp.text}")
+        except Exception as e:
+            logger.warning(f"n8n webhook dispatch failed (non-fatal): {e}")
+        return False
 
     async def _call_ml_engine_analyze(
         self,
@@ -164,6 +190,47 @@ class OrchestrationService:
             "execution_status": "SUCCESS",
         }
 
+    async def _call_genai_diagnose(
+        self,
+        service_name: str,
+        metrics: Dict[str, float],
+    ) -> Optional[Dict[str, Any]]:
+        """Call GenAI Agent POST /diagnose."""
+        payload = {
+            "metrics": {
+                "service_name": service_name,
+                "cpu_usage": float(metrics.get("cpu_usage", 0.0)),
+                "memory_usage": float(metrics.get("memory_usage", 0.0)),
+                "disk_io": float(metrics.get("disk_io", 0.0)),
+                "network_latency_ms": float(metrics.get("network_latency_ms", 0.0)),
+                "request_count": int(metrics.get("request_count", 0)),
+                "error_rate": float(metrics.get("error_rate", 0.0)),
+                "response_time_p99": float(metrics.get("response_time_p99", 0.0)),
+                "active_connections": int(metrics.get("active_connections", 0)),
+                "gc_pause_ms": float(metrics.get("gc_pause_ms", 0.0)),
+                "thread_count": int(metrics.get("thread_count", 0)),
+            },
+            "logs": [
+                {
+                    "service": service_name,
+                    "message": f"Anomaly on {service_name}: error_rate={metrics.get('error_rate', 0)}%, latency_p99={metrics.get('response_time_p99', 0)}ms",
+                }
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    f"{self.genai_agent_url}/diagnose",
+                    json=payload,
+                )
+                if resp.status_code == 200:
+                    return resp.json()
+                else:
+                    logger.warning(f"GenAI Agent returned {resp.status_code}: {resp.text}")
+        except Exception as e:
+            logger.warning(f"GenAI Agent unreachable at {self.genai_agent_url} ({e}); using graph fallback.")
+        return None
+
     async def orchestrate_incident_lifecycle(
         self,
         service_name: str,
@@ -175,19 +242,24 @@ class OrchestrationService:
         current_user: Optional[User] = None,
     ) -> UnifiedIncidentRecordResponse:
         """
-        Execute full end-to-end incident lifecycle:
-        1. Resolve Service from DB
+        Execute full end-to-end incident lifecycle with deduplication:
+        1. Resolve Service from DB & check for active incident
         2. ML Engine Analysis (Prediction + RCA candidates)
-        3. Confidence Routing Evaluation
-        4. Remediation Execution (if auto_remediate)
-        5. PostgreSQL Record Persistence (Incident, History, RiskAssessment)
-        6. Real-time SSE dispatch
+        3. Incident Deduplication:
+           - Active incident + risk >= 40: update existing observation, debounce GenAI
+           - Active incident + risk < 40: mark recovered/resolved
+           - No active incident + risk >= 40: create incident & trigger GenAI RCA
+        4. Real-time SSE dispatch
         """
         now = datetime.now(timezone.utc)
+
+        # 0. Resolve database user for audit trail FK
+        user_db_id = getattr(current_user, "id", None) if current_user and getattr(current_user, "username", None) != "system" else None
 
         # 1. Resolve service
         target_service = None
         dep_names = []
+        existing_incident = None
         if db:
             svc_res = await db.execute(
                 select(Service).where(Service.service_name == service_name)
@@ -201,6 +273,14 @@ class OrchestrationService:
                 )
                 dep_names = [r[0] for r in dep_res.all()]
 
+                # Query existing OPEN incident for deduplication / debouncing
+                inc_res = await db.execute(
+                    select(Incident)
+                    .where(Incident.service_id == target_service.id, Incident.status == "OPEN")
+                    .order_by(Incident.created_at.desc())
+                )
+                existing_incident = inc_res.scalars().first()
+
         # 2. ML Engine analysis
         ml_data = await self._call_ml_engine_analyze(service_name, metrics)
         prediction_block = ml_data.get("prediction", {})
@@ -211,100 +291,224 @@ class OrchestrationService:
         rca_conf = float(diagnosis_block.get("rca_confidence", 0.85))
         failure_type = prediction_block.get("predicted_failure_type", "ANOMALOUS_SATURATION")
 
-        # 3. Person 1 Confidence Routing
-        routing_block = self._evaluate_confidence_router(ml_conf, rca_conf)
-        decision = routing_block["routing_decision"]
-
-        # 4. Remediation execution
-        automation_block = await self._execute_runbook_action(
-            failure_type=failure_type,
-            target_service=service_name,
-            routing_decision=decision,
-        )
-
-        # Determine severity & status
         severity = "CRITICAL" if risk_score >= 75.0 else "HIGH" if risk_score >= 40.0 else "MEDIUM"
-        incident_status = "RESOLVED" if decision == "auto_remediate" and automation_block.get("execution_status") == "SUCCESS" else "OPEN"
 
-        # 5. Persist to PostgreSQL
-        incident_id = uuid4()
-        if db:
-            incident = Incident(
-                id=incident_id,
-                title=f"Incident: {failure_type.replace('_', ' ').title()} on {service_name}",
-                description=(
-                    f"Automated risk detection triggered for {service_name}. "
-                    f"Composite risk score: {risk_score:.1f}, ML Confidence: {ml_conf:.2f}, RCA Confidence: {rca_conf:.2f}. "
-                    f"Routing Decision: {decision.upper()}."
-                ),
-                severity=severity,
-                status=incident_status,
-                service_id=target_service.id if target_service else None,
-                risk_score=Decimal(str(round(risk_score, 2))),
-                confidence=Decimal(str(round(ml_conf, 4))),
-                predicted_failure=now,
-                resolved_at=now if incident_status == "RESOLVED" else None,
-                assigned_to=assigned_to,
-                created_by=current_user.id if current_user else None,
-            )
-            db.add(incident)
-            await db.flush()
+        # 3. Handle Deduplication / Debouncing / Recovery
+        is_recovered = (risk_score < 60.0) or (not prediction_block.get("anomaly_detail", {}).get("is_anomaly", True) and risk_score < 75.0)
+        if existing_incident is not None:
+            if is_recovered:
+                # RECOVERY: service returned to normal/healthy (Section 7.10)
+                existing_incident.status = "RESOLVED"
+                existing_incident.resolved_at = now
+                existing_incident.risk_score = Decimal(str(round(risk_score, 2)))
+                if db:
+                    db.add(
+                        IncidentHistory(
+                            incident_id=existing_incident.id,
+                            action="RECOVERED",
+                            old_value="OPEN",
+                            new_value=f"Telemetry recovered below WATCH threshold (risk_score={risk_score:.1f}). Incident automatically closed.",
+                            changed_by=user_db_id,
+                        )
+                    )
+                    await db.flush()
+                await sse_manager.broadcast_risk_alert({
+                    "service_name": service_name,
+                    "risk_score": risk_score,
+                    "severity": "HEALTHY",
+                    "status": "RESOLVED",
+                    "timestamp": now.isoformat(),
+                })
 
-            # Record History Logs
-            db.add(
-                IncidentHistory(
-                    incident_id=incident_id,
-                    action="CREATED",
-                    old_value=None,
-                    new_value=f"Detected anomaly with risk score {risk_score:.1f} ({severity})",
-                    changed_by=current_user.id if current_user else None,
-                )
+                # Notify n8n of resolution so automation stops remediation
+                recovery_payload = {
+                    "incident_id": str(existing_incident.id),
+                    "service": service_name,
+                    "severity": "HEALTHY",
+                    "risk_score": round(risk_score, 2),
+                    "risk_tier": "HEALTHY",
+                    "predicted_failure": "none",
+                    "anomaly_score": round(risk_score / 100.0, 4),
+                    "forecast_risk": round(risk_score / 100.0, 4),
+                    "root_cause": "none",
+                    "affected_services": [service_name],
+                    "confidence": 1.0,
+                    "routing_decision": "none",
+                    "timestamp": now.isoformat(),
+                    "guidance": "Service recovered below WATCH threshold. Incident resolved.",
+                    "status": "RESOLVED",
+                }
+                await self._send_n8n_incident(recovery_payload)
+
+                incident_id = existing_incident.id
+                incident_status = "RESOLVED"
+                decision = "escalate"
+                routing_block = self._evaluate_confidence_router(ml_conf, rca_conf)
+                automation_block = {"execution_status": "SKIPPED_RECOVERED", "actions_executed": []}
+            else:
+                # DEBOUNCE: existing incident updated with latest observation, NO duplicate GenAI or n8n calls (Section 7.9)
+                existing_incident.risk_score = Decimal(str(round(risk_score, 2)))
+                existing_incident.severity = severity
+                existing_incident.confidence = Decimal(str(round(ml_conf, 4)))
+                existing_incident.anomaly_score = Decimal(str(round(risk_score / 100.0, 4)))
+                existing_incident.top_features = metrics
+                if db:
+                    db.add(
+                        IncidentHistory(
+                            incident_id=existing_incident.id,
+                            action="OBSERVATION_UPDATED",
+                            old_value=None,
+                            new_value=f"Telemetry re-evaluation: risk_score={risk_score:.1f} ({severity}). Debounced: existing incident updated without re-invoking Gemini or duplicate n8n automation.",
+                            changed_by=user_db_id,
+                        )
+                    )
+                    await db.flush()
+                await sse_manager.broadcast_risk_alert({
+                    "service_name": service_name,
+                    "risk_score": risk_score,
+                    "severity": severity,
+                    "status": "OPEN",
+                    "timestamp": now.isoformat(),
+                })
+                incident_id = existing_incident.id
+                incident_status = "OPEN"
+                routing_block = self._evaluate_confidence_router(ml_conf, rca_conf)
+                decision = routing_block["routing_decision"]
+                automation_block = {"execution_status": "SKIPPED_DEBOUNCED", "actions_executed": []}
+        else:
+            # NEW INCIDENT: Invoke GenAI Agent for RCA
+            genai_data = await self._call_genai_diagnose(service_name, metrics)
+            if genai_data:
+                genai_candidates = genai_data.get("root_cause_candidates_ranked", [])
+                if genai_candidates:
+                    diagnosis_block["rca_candidates"] = [
+                        {
+                            "service": c.get("affected_services", [service_name])[0] if c.get("affected_services") else service_name,
+                            "label": "ROOT_CAUSE" if idx == 0 else "CONTRIBUTOR",
+                            "confidence": c.get("confidence", 0.90),
+                            "cause": c.get("cause", ""),
+                            "reason": c.get("reason", ""),
+                        }
+                        for idx, c in enumerate(genai_candidates)
+                    ]
+                if genai_data.get("guidance"):
+                    summary = genai_data["guidance"].get("summary", "")
+                    if summary:
+                        diagnosis_block["gemini_explanation"] = summary
+                if genai_data.get("routing_decision"):
+                    decision = genai_data["routing_decision"]
+
+            routing_block = self._evaluate_confidence_router(ml_conf, rca_conf)
+            decision = routing_block["routing_decision"]
+
+            automation_block = await self._execute_runbook_action(
+                failure_type=failure_type,
+                target_service=service_name,
+                routing_decision=decision,
             )
-            db.add(
-                IncidentHistory(
-                    incident_id=incident_id,
-                    action="ROUTING_DECIDED",
-                    old_value=None,
-                    new_value=f"Confidence router selected '{decision.upper()}' (Overall Conf: {routing_block['routing_confidence']:.2f})",
-                    changed_by=current_user.id if current_user else None,
-                )
+
+            # In v1 safety rules: remediation requires human approval (no auto restart)
+            incident_status = "OPEN"
+            incident_id = uuid4()
+            root_cause_str = (
+                diagnosis_block.get("rca_candidates", [{}])[0].get("service", service_name)
+                if diagnosis_block.get("rca_candidates")
+                else service_name
             )
-            if decision == "auto_remediate":
+            guidance_str = diagnosis_block.get("gemini_explanation", f"Latency degradation observed on {service_name}.")
+
+            if db:
+                incident = Incident(
+                    id=incident_id,
+                    title=f"Incident: {failure_type.replace('_', ' ').title()} on {service_name}",
+                    description=(
+                        f"Automated risk detection triggered for {service_name}. "
+                        f"Composite risk score: {risk_score:.1f}, ML Confidence: {ml_conf:.2f}, RCA Confidence: {rca_conf:.2f}. "
+                        f"Routing Decision: HUMAN_APPROVAL."
+                    ),
+                    severity=severity,
+                    status=incident_status,
+                    service_id=target_service.id if target_service else None,
+                    risk_score=Decimal(str(round(risk_score, 2))),
+                    confidence=Decimal(str(round(ml_conf, 4))),
+                    predicted_failure=now,
+                    risk_tier=severity,
+                    anomaly_score=Decimal(str(round(risk_score / 100.0, 4))),
+                    forecast_risk=Decimal(str(round(risk_score / 100.0, 4))),
+                    predicted_failure_type=failure_type,
+                    root_cause=root_cause_str,
+                    guidance=guidance_str,
+                    routing_decision="human_approval",
+                    top_features=metrics,
+                    affected_services=diagnosis_block.get("propagation_path", [service_name]),
+                    resolved_at=None,
+                    assigned_to=assigned_to,
+                    created_by=user_db_id,
+                )
+                db.add(incident)
+                await db.flush()
+
                 db.add(
                     IncidentHistory(
                         incident_id=incident_id,
-                        action="AUTO_REMEDIATED",
-                        old_value="OPEN",
-                        new_value=f"Executed runbook actions: {len(automation_block.get('actions_executed', []))} step(s) completed",
-                        changed_by=current_user.id if current_user else None,
+                        action="CREATED",
+                        old_value=None,
+                        new_value=f"Detected anomaly with risk score {risk_score:.1f} ({severity})",
+                        changed_by=user_db_id,
                     )
                 )
-
-            # Record Risk Assessment
-            if target_service:
                 db.add(
-                    RiskAssessment(
-                        service_id=target_service.id,
-                        risk_score=Decimal(str(round(risk_score, 2))),
-                        confidence=Decimal(str(round(ml_conf, 4))),
-                        anomaly_score=Decimal(str(round(risk_score / 100.0, 4))),
-                        affected_services=diagnosis_block.get("propagation_path", [service_name]),
-                        features_used=metrics,
-                        model_version="v1.0.0",
+                    IncidentHistory(
+                        incident_id=incident_id,
+                        action="ROUTING_DECIDED",
+                        old_value=None,
+                        new_value=f"Confidence router selected 'HUMAN_APPROVAL' (Overall Conf: {routing_block['routing_confidence']:.2f})",
+                        changed_by=user_db_id,
                     )
                 )
 
-            await db.flush()
+                if target_service:
+                    db.add(
+                        RiskAssessment(
+                            service_id=target_service.id,
+                            risk_score=Decimal(str(round(risk_score, 2))),
+                            confidence=Decimal(str(round(ml_conf, 4))),
+                            anomaly_score=Decimal(str(round(risk_score / 100.0, 4))),
+                            affected_services=diagnosis_block.get("propagation_path", [service_name]),
+                            features_used=metrics,
+                            model_version="v1.0.0",
+                        )
+                    )
 
-            # 6. Broadcast Real-time SSE Events
-            await sse_manager.broadcast_incident_created(incident)
-            await sse_manager.broadcast_risk_alert({
-                "service_name": service_name,
-                "risk_score": risk_score,
+                await db.flush()
+                await sse_manager.broadcast_incident_created(incident)
+                await sse_manager.broadcast_risk_alert({
+                    "service_name": service_name,
+                    "risk_score": risk_score,
+                    "severity": severity,
+                    "routing_decision": "human_approval",
+                    "timestamp": now.isoformat(),
+                })
+
+            # Dispatch incident event to n8n webhook (Section 7.3)
+            n8n_payload = {
+                "incident_id": str(incident_id),
+                "service": service_name,
                 "severity": severity,
-                "routing_decision": decision,
+                "risk_score": round(risk_score, 2),
+                "risk_tier": severity,
+                "predicted_failure": failure_type,
+                "anomaly_score": round(risk_score / 100.0, 4),
+                "forecast_risk": round(risk_score / 100.0, 4),
+                "root_cause": root_cause_str,
+                "affected_services": diagnosis_block.get("propagation_path", [service_name]),
+                "confidence": round(ml_conf, 4),
+                "routing_decision": "human_approval",
                 "timestamp": now.isoformat(),
-            })
+                "guidance": guidance_str,
+                "status": incident_status,
+            }
+            await self._send_n8n_incident(n8n_payload)
 
         # 7. Build unified incident record response
         return UnifiedIncidentRecordResponse(

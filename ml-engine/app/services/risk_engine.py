@@ -21,13 +21,15 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
 from loguru import logger
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List, Any
 
 from app.models.anomaly_detector import AnomalyDetector
 from app.models.failure_forecaster import FailureForecaster
+from app.services.graph_builder import GraphBuilder
 from app.schemas.prediction import (
     PredictionResponse, AnomalyDetail, ForecastDetail, RiskTier,
 )
+import networkx as nx
 
 
 class RiskEngine:
@@ -39,6 +41,8 @@ class RiskEngine:
     # Weighting for composite score
     ANOMALY_WEIGHT = 0.60
     FORECAST_WEIGHT = 0.40
+    ACTIVE_ANOMALY_WEIGHT = 0.85
+    ACTIVE_FORECAST_WEIGHT = 0.15
 
     # Risk tier thresholds
     HEALTHY_THRESHOLD = 40.0
@@ -47,6 +51,12 @@ class RiskEngine:
     def __init__(self):
         self.anomaly_detector = AnomalyDetector(contamination=0.03)
         self.failure_forecaster = FailureForecaster(forecast_periods=12)
+        self.graph_builder = GraphBuilder()
+        try:
+            self.graph_builder.build_graph()
+        except Exception as e:
+            logger.warning(f"Could not build dependency graph in RiskEngine: {e}")
+        self._service_risk_cache: Dict[str, Dict[str, Any]] = {}
         self.is_trained = False
         self._last_trained_at: Optional[str] = None
         self._training_samples: int = 0
@@ -87,56 +97,91 @@ class RiskEngine:
         logger.info(f"RiskEngine training complete: {len(self._services_list)} services")
         return combined
 
-    def score(self, service_name: str, metrics: Dict) -> PredictionResponse:
+    def score(
+        self,
+        service_name: str,
+        metrics: Dict,
+        dependencies_risk: Optional[Dict[str, float]] = None,
+    ) -> PredictionResponse:
         """
-        Compute the composite risk score for a service.
+        Compute the composite risk score for a service with P2 topology-aware cascade propagation.
 
         Args:
             service_name: Name of the microservice.
             metrics: Dict of metric values (raw, not scaled).
+            dependencies_risk: Optional explicit mapping of dependency name -> risk score.
 
         Returns:
-            PredictionResponse with full risk assessment.
+            PredictionResponse with full risk assessment and cascade details.
         """
         if not self.is_trained:
             raise RuntimeError("RiskEngine not trained. Call train() first.")
 
-        # 1. Anomaly Detection
-        anomaly_score, is_anomaly, top_features = self.anomaly_detector.predict(metrics)
+        # 1. Anomaly Detection (P1: returns guardrail_info)
+        anomaly_score, is_anomaly, top_features, guardrail_info = self.anomaly_detector.predict(
+            metrics, return_guardrail=True
+        )
 
         # 2. Failure Forecast
         forecast_result = self.failure_forecaster.forecast(service_name)
         forecast_risk = forecast_result["forecast_risk"]
 
-        # 3. Composite Risk Score
-        raw_score = (
-            self.ANOMALY_WEIGHT * anomaly_score
-            + self.FORECAST_WEIGHT * forecast_risk
-        )
-        risk_score = round(min(100.0, max(0.0, raw_score * 100)), 2)
+        # 3. Composite Local Risk Score (P0-3: 85% anomaly + 15% forecast during active anomaly; 60/40 normal)
+        if is_anomaly:
+            raw_score = (
+                self.ACTIVE_ANOMALY_WEIGHT * anomaly_score
+                + self.ACTIVE_FORECAST_WEIGHT * forecast_risk
+            )
+        else:
+            raw_score = (
+                self.ANOMALY_WEIGHT * anomaly_score
+                + self.FORECAST_WEIGHT * forecast_risk
+            )
+        local_risk_score = round(min(100.0, max(0.0, raw_score * 100)), 2)
 
-        # 4. Classify tier
-        risk_tier = self._classify_tier(risk_score)
+        # Update cache for this service
+        self._service_risk_cache[service_name] = {
+            "local_risk_score": local_risk_score,
+            "is_anomaly": is_anomaly,
+            "anomaly_score": anomaly_score,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # 4. Topology-Aware Cascade Risk Propagation (P2)
+        upstream_incidents, propagation_contribution, best_path, best_depth = self._calculate_cascade_risk(
+            service_name, dependencies_risk
+        )
+
+        topology_adjusted_risk_score = round(
+            min(100.0, max(local_risk_score, local_risk_score + propagation_contribution)), 2
+        )
+
+        # Final risk score is topology-adjusted, but local score is preserved
+        final_risk_score = topology_adjusted_risk_score
+        risk_tier = self._classify_tier(final_risk_score)
 
         # 5. Compute confidence (higher when both models agree)
         confidence = self._compute_confidence(anomaly_score, forecast_risk)
 
-        # 6. Determine predicted failure type
-        predicted_failure_type = forecast_result["predicted_failure_type"]
-        if predicted_failure_type == "none" and is_anomaly:
-            # Anomaly detected but forecaster doesn't predict specific failure
-            # Use the top contributing feature to infer failure type
+        # 6. Determine predicted failure type (P0-2: prioritize live top features during anomaly)
+        if is_anomaly:
             predicted_failure_type = self._infer_failure_type(top_features)
+            if predicted_failure_type == "none":
+                predicted_failure_type = forecast_result["predicted_failure_type"]
+        elif propagation_contribution >= 15.0:
+            predicted_failure_type = "cascading_failure"
+        else:
+            predicted_failure_type = forecast_result["predicted_failure_type"]
 
         # 7. Compute 95% confidence interval based on model confidence
         uncertainty_margin = round((1.0 - confidence) * 15.0, 2)
-        ci_lower = round(max(0.0, risk_score - uncertainty_margin), 2)
-        ci_upper = round(min(100.0, risk_score + uncertainty_margin), 2)
+        ci_lower = round(max(0.0, final_risk_score - uncertainty_margin), 2)
+        ci_upper = round(min(100.0, final_risk_score + uncertainty_margin), 2)
         risk_ci = {"lower": ci_lower, "upper": ci_upper}
 
         forecast_ci = {
             "lower": round(max(0.0, forecast_risk - (1.0 - confidence) * 0.15), 4),
-            "upper": round(min(1.0, forecast_risk + (1.0 - confidence) * 0.15), 4),
+            "upper": round(min(100.0, forecast_risk + (1.0 - confidence) * 0.15), 4),
         }
 
         # Build response
@@ -144,7 +189,7 @@ class RiskEngine:
             predicted_at=datetime.now(timezone.utc).isoformat(),
             model_name="synapse_riskops_v1",
             service_name=service_name,
-            risk_score=risk_score,
+            risk_score=final_risk_score,
             risk_threshold=self.WATCH_THRESHOLD,
             risk_tier=risk_tier,
             confidence=round(confidence, 4),
@@ -155,6 +200,7 @@ class RiskEngine:
                 anomaly_score=round(anomaly_score, 4),
                 is_anomaly=is_anomaly,
                 top_contributing_features=top_features,
+                guardrail_info=guardrail_info,
             ),
             forecast_detail=ForecastDetail(
                 forecast_risk=round(forecast_risk, 4),
@@ -163,7 +209,99 @@ class RiskEngine:
                 trend_direction=forecast_result["trend_direction"],
                 confidence_interval=forecast_ci,
             ),
+            local_risk_score=local_risk_score,
+            topology_adjusted_risk_score=topology_adjusted_risk_score,
+            upstream_incidents=upstream_incidents if upstream_incidents else None,
+            propagation_contribution=round(propagation_contribution, 2) if propagation_contribution > 0 else 0.0,
+            dependency_path=best_path,
+            cascade_depth=best_depth,
         )
+
+    def _calculate_cascade_risk(
+        self,
+        service_name: str,
+        dependencies_risk: Optional[Dict[str, float]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float, Optional[List[str]], Optional[int]]:
+        """
+        P2 Topology-Aware Cascade Risk Calculation.
+        Finds upstream dependencies (services called by this service).
+        Applies distance decay: factor = 0.60 * (0.50 ** (distance - 1)).
+        Cycles are safely avoided by using NetworkX shortest paths.
+        """
+        if not self.graph_builder.is_built or service_name not in self.graph_builder.graph:
+            return [], 0.0, None, None
+
+        graph = self.graph_builder.graph
+        upstream_nodes = list(nx.descendants(graph, service_name))
+        if not upstream_nodes:
+            return [], 0.0, None, None
+
+        upstream_incidents = []
+        contributions = []
+        best_path = None
+        best_depth = None
+        max_contrib = 0.0
+
+        for dep in upstream_nodes:
+            # Check dependency risk score
+            dep_risk: Optional[float] = None
+            if dependencies_risk and dep in dependencies_risk:
+                dep_risk = float(dependencies_risk[dep])
+            elif dep in self._service_risk_cache:
+                dep_risk = float(self._service_risk_cache[dep].get("local_risk_score", 0.0))
+
+            if dep_risk is None or dep_risk < self.HEALTHY_THRESHOLD:
+                continue
+
+            try:
+                path = nx.shortest_path(graph, service_name, dep)
+            except nx.NetworkXNoPath:
+                continue
+
+            dist = len(path) - 1
+            if dist < 1:
+                continue
+
+            # Decay factor: d=1 -> 0.60, d=2 -> 0.30, d=3 -> 0.15
+            decay = 0.60 * (0.50 ** (dist - 1))
+
+            # Criticality weighting along path
+            is_crit_path = True
+            for u, v in zip(path[:-1], path[1:]):
+                if not graph[u][v].get("is_critical", False):
+                    is_crit_path = False
+                    break
+            crit_mult = 1.0 if is_crit_path else 0.70
+
+            # Bounded raw contribution from upstream degradation above healthy baseline (30)
+            raw_contrib = max(0.0, (dep_risk - 30.0)) * decay * crit_mult
+            contrib = min(35.0, raw_contrib)
+
+            upstream_incidents.append({
+                "service": dep,
+                "risk_score": round(dep_risk, 2),
+                "distance": dist,
+                "path": path,
+                "contribution": round(contrib, 2),
+            })
+            contributions.append(contrib)
+
+            if contrib > max_contrib:
+                max_contrib = contrib
+                best_path = path
+                best_depth = dist
+
+        if not contributions:
+            return [], 0.0, None, None
+
+        # Cumulative propagation: dominant contributor + dampened remainder, capped at 35.0
+        sorted_contribs = sorted(contributions, reverse=True)
+        total_propagation = sorted_contribs[0]
+        for c in sorted_contribs[1:]:
+            total_propagation += c * 0.25
+        total_propagation = min(35.0, total_propagation)
+
+        return upstream_incidents, total_propagation, best_path, best_depth
 
     def _classify_tier(self, risk_score: float) -> RiskTier:
         """Classify the risk score into a tier."""

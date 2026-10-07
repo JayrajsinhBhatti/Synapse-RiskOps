@@ -89,6 +89,15 @@ class IncidentResponse(BaseModel):
     risk_score: Optional[Decimal] = None
     confidence: Optional[Decimal] = None
     predicted_failure: Optional[datetime] = None
+    risk_tier: Optional[str] = None
+    anomaly_score: Optional[Decimal] = None
+    forecast_risk: Optional[Decimal] = None
+    predicted_failure_type: Optional[str] = None
+    root_cause: Optional[str] = None
+    guidance: Optional[str] = None
+    routing_decision: Optional[str] = None
+    top_features: Optional[dict] = None
+    affected_services: Optional[list] = None
 
     detected_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None

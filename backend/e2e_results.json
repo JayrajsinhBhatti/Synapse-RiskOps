@@ -1,0 +1,241 @@
+{
+  "timeline": {
+    "T0": "2026-10-07T09:27:14.617480+00:00",
+    "T1": "2026-10-07T09:27:25.672706+00:00",
+    "T2": "2026-10-07T09:27:47.302219+00:00",
+    "T3": "2026-10-07T09:27:49.302810+00:00",
+    "T4": "2026-10-07T09:27:49.781238+00:00",
+    "T5": "2026-10-07T09:27:50.503662+00:00",
+    "T6": "2026-10-07T09:27:53.964175+00:00",
+    "T7": "2026-10-07T09:27:53.964175+00:00",
+    "T8": "2026-10-07T09:27:53.964175+00:00",
+    "T9": "2026-10-07T09:27:56.473966+00:00",
+    "T10": "2026-10-07T09:27:59.051886+00:00",
+    "T11": "2026-10-07T09:27:59.522551+00:00",
+    "T12": "2026-10-07T09:28:03.164184+00:00"
+  },
+  "evidence": {
+    "baseline_telemetry": {
+      "service_name": "payment-service",
+      "cpu_usage": 0.42,
+      "memory_usage": 29.47,
+      "disk_io": 0.87,
+      "network_latency_ms": 3500.0,
+      "request_count": 0,
+      "error_rate": 100.0,
+      "response_time_p99": 4970.0,
+      "active_connections": 0,
+      "gc_pause_ms": 0.29,
+      "thread_count": 2,
+      "timestamp": "2026-10-07T09:27:25.671568+00:00"
+    },
+    "chaos_injected": {
+      "service": "payment-service",
+      "active_faults_count": 1,
+      "active_faults": {
+        "latency": {
+          "fault_type": "latency",
+          "intensity": 0.85,
+          "remaining_seconds": 59
+        }
+      }
+    },
+    "degraded_telemetry": {
+      "service_name": "payment-service",
+      "cpu_usage": 0.8,
+      "memory_usage": 29.47,
+      "disk_io": 1.84,
+      "network_latency_ms": 2135.14,
+      "request_count": 0,
+      "error_rate": 100.0,
+      "response_time_p99": 3050.2,
+      "active_connections": 0,
+      "gc_pause_ms": 200.32,
+      "thread_count": 2,
+      "timestamp": "2026-10-07T09:27:49.777799+00:00"
+    },
+    "ml_prediction": {
+      "predicted_at": "2026-10-07T09:27:50.501056+00:00",
+      "model_name": "synapse_riskops_v1",
+      "service_name": "payment-service",
+      "risk_score": 93.42,
+      "risk_threshold": 75.0,
+      "risk_tier": "critical",
+      "confidence": 0.6982,
+      "confidence_interval": {
+        "lower": 88.89,
+        "upper": 97.95
+      },
+      "predicted_failure_type": "latency_degradation",
+      "prediction_horizon_minutes": 60,
+      "anomaly_detail": {
+        "anomaly_score": 0.9807,
+        "is_anomaly": true,
+        "top_contributing_features": [
+          "network_latency_ms",
+          "response_time_p99",
+          "gc_pause_ms"
+        ],
+        "guardrail_info": {
+          "triggered": true,
+          "max_z": 168.3,
+          "max_feature": "network_latency_ms",
+          "boost": 0.0129,
+          "feature_z_scores": {
+            "memory_usage": 2.27,
+            "network_latency_ms": 168.3,
+            "error_rate": 46.23,
+            "response_time_p99": 64.21,
+            "gc_pause_ms": 46.54
+          }
+        }
+      },
+      "forecast_detail": {
+        "forecast_risk": 0.6711,
+        "predicted_failure_type": "memory_exhaustion",
+        "prediction_horizon_minutes": 60,
+        "trend_direction": "stable",
+        "confidence_interval": {
+          "lower": 0.6258,
+          "upper": 0.7164
+        }
+      },
+      "local_risk_score": 93.42,
+      "topology_adjusted_risk_score": 93.42,
+      "upstream_incidents": null,
+      "propagation_contribution": 0.0,
+      "dependency_path": null,
+      "cascade_depth": null
+    },
+    "incident_record": {
+      "incident_id": "a655c446-8913-4568-b515-8ffac20cbaa4",
+      "created_at": "2026-10-07T09:27:53.200205+00:00",
+      "service": {
+        "service_name": "payment-service",
+        "environment": "production",
+        "dependency_ids": [
+          "message-queue",
+          "postgres-primary"
+        ]
+      },
+      "prediction": {
+        "predicted_at": "2026-10-07T09:27:53.200205+00:00",
+        "model_name": "synapse_riskops_v1",
+        "risk_score": 93.42,
+        "risk_threshold": 75.0,
+        "predicted_failure_type": "latency_degradation",
+        "prediction_horizon_minutes": 60
+      },
+      "diagnosis": {
+        "diagnosis_started_at": "2026-10-07T09:27:53.200205+00:00",
+        "diagnosis_completed_at": "2026-10-07T09:27:53.200205+00:00",
+        "agent_pipeline": [
+          "ml-engine:isolation_forest",
+          "ml-engine:networkx_rca",
+          "genai-agent:confidence_router"
+        ],
+        "predicted_root_cause_service": "payment-service",
+        "predicted_root_cause_label": "ROOT_CAUSE",
+        "root_cause_candidates_ranked": [],
+        "propagation_path": [
+          "payment-service"
+        ],
+        "rca_confidence": 0.85,
+        "gemini_explanation": "RCA candidate graph traversal completed."
+      },
+      "routing": {
+        "routing_decision": "escalate",
+        "routing_confidence": 0.7741,
+        "routing_threshold_used": 0.85,
+        "human_override": false,
+        "human_override_reason": null,
+        "was_routing_correct": null
+      },
+      "automation": {
+        "execution_status": "SKIPPED_DEBOUNCED",
+        "actions_executed": []
+      },
+      "lifecycle_status": "OPEN"
+    },
+    "persisted_incident": {
+      "id": "a655c446-8913-4568-b515-8ffac20cbaa4",
+      "title": "Incident: Payment Service Latency Degradation",
+      "description": "Autonomous risk detection triggered for payment-service.",
+      "severity": "CRITICAL",
+      "status": "OPEN",
+      "service_id": "3f53d6f5-f070-420f-8321-13d8a197e626",
+      "risk_score": "93.42",
+      "confidence": "0.6982",
+      "predicted_failure": "2026-10-07T08:42:46.284407Z",
+      "risk_tier": "CRITICAL",
+      "anomaly_score": "0.934200",
+      "forecast_risk": "0.740000",
+      "predicted_failure_type": "latency_degradation",
+      "root_cause": "payment-service latency degradation",
+      "guidance": "Scale service or increase connection pool",
+      "routing_decision": "human_approval",
+      "top_features": {
+        "disk_io": 1.84,
+        "cpu_usage": 0.8,
+        "error_rate": 100.0,
+        "gc_pause_ms": 200.32,
+        "memory_usage": 29.47,
+        "thread_count": 2.0,
+        "request_count": 0.0,
+        "response_time_p99": 3050.2,
+        "active_connections": 0.0,
+        "network_latency_ms": 2135.14
+      },
+      "affected_services": [
+        "payment-service",
+        "order-service"
+      ],
+      "detected_at": "2026-10-07T08:42:46.284407Z",
+      "resolved_at": null,
+      "assigned_to": null,
+      "created_by": null,
+      "created_at": "2026-10-07T08:42:46.271030Z",
+      "updated_at": "2026-10-07T09:27:53.191029Z"
+    },
+    "final_incident": {
+      "id": "a655c446-8913-4568-b515-8ffac20cbaa4",
+      "title": "Incident: Payment Service Latency Degradation",
+      "description": "Autonomous risk detection triggered for payment-service.",
+      "severity": "CRITICAL",
+      "status": "RESOLVED",
+      "service_id": "3f53d6f5-f070-420f-8321-13d8a197e626",
+      "risk_score": "52.78",
+      "confidence": "0.6982",
+      "predicted_failure": "2026-10-07T08:42:46.284407Z",
+      "risk_tier": "CRITICAL",
+      "anomaly_score": "0.934200",
+      "forecast_risk": "0.740000",
+      "predicted_failure_type": "latency_degradation",
+      "root_cause": "payment-service latency degradation",
+      "guidance": "Scale service or increase connection pool",
+      "routing_decision": "human_approval",
+      "top_features": {
+        "disk_io": 1.84,
+        "cpu_usage": 0.8,
+        "error_rate": 100.0,
+        "gc_pause_ms": 200.32,
+        "memory_usage": 29.47,
+        "thread_count": 2.0,
+        "request_count": 0.0,
+        "response_time_p99": 3050.2,
+        "active_connections": 0.0,
+        "network_latency_ms": 2135.14
+      },
+      "affected_services": [
+        "payment-service",
+        "order-service"
+      ],
+      "detected_at": "2026-10-07T08:42:46.284407Z",
+      "resolved_at": "2026-10-07T09:28:02.002435Z",
+      "assigned_to": null,
+      "created_by": null,
+      "created_at": "2026-10-07T08:42:46.271030Z",
+      "updated_at": "2026-10-07T09:28:02.002238Z"
+    }
+  }
+}

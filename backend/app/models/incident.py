@@ -16,7 +16,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -49,6 +49,15 @@ class Incident(Base):
     risk_score = Column(Numeric(5, 2), nullable=True)
     confidence = Column(Numeric(5, 4), nullable=True)
     predicted_failure = Column(DateTime(timezone=True), nullable=True)
+    risk_tier = Column(String(20), nullable=True)
+    anomaly_score = Column(Numeric(10, 6), nullable=True)
+    forecast_risk = Column(Numeric(10, 6), nullable=True)
+    predicted_failure_type = Column(String(100), nullable=True)
+    root_cause = Column(Text, nullable=True)
+    guidance = Column(Text, nullable=True)
+    routing_decision = Column(String(50), nullable=True)
+    top_features = Column(JSONB, nullable=True)
+    affected_services = Column(JSONB, nullable=True)
 
     detected_at = Column(
         DateTime(timezone=True),
