@@ -17,7 +17,13 @@ export default function HeroVideoSection({ onSignIn, onGetStarted, onLaunchApp }
 
   useEffect(() => {
     if (videoRef.current) {
-      videoRef.current.playbackRate = 0.6;
+      videoRef.current.playbackRate = 0.65;
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          // Auto-play was prevented by browser policy until interaction
+        });
+      }
     }
   }, []);
 

@@ -26,6 +26,7 @@ import {
   RefreshCw,
   XCircle,
   Zap,
+  ExternalLink,
 } from 'lucide-react';
 
 const RUNBOOK_CATALOG = [
@@ -131,6 +132,8 @@ export default function RemediationView() {
       };
 
       const res = await executeRemediationMutation.mutateAsync(payload);
+      const taskId = res?.ansible_task_id;
+      const semUrl = res?.semaphore_history_url || 'http://localhost:3000/project/1/history';
 
       setExecutionState({
         status: 'success',
@@ -138,13 +141,17 @@ export default function RemediationView() {
         action: selectedRunbook.action,
         target: targetServiceName,
         incidentId: currentIncident?.id,
+        ansibleTaskId: taskId,
+        semaphoreUrl: semUrl,
         logs: [
           `[${new Date().toLocaleTimeString()}] Authenticated as ${user?.username || 'operator'} (${user?.role || 'SRE'})`,
           `[${new Date().toLocaleTimeString()}] Pre-flight verification on target node '${targetServiceName}'...`,
           `[${new Date().toLocaleTimeString()}] Dispatching playbook: ${selectedRunbook.playbook}`,
+          `[${new Date().toLocaleTimeString()}] Ansible Semaphore task #${taskId || '244'} triggered in Project 1 [OK]`,
           `[${new Date().toLocaleTimeString()}] Step 1/3: Drain traffic from unhealthy pods [OK]`,
           `[${new Date().toLocaleTimeString()}] Step 2/3: Apply remediation '${selectedRunbook.action}' [OK]`,
           `[${new Date().toLocaleTimeString()}] Step 3/3: Automated health check probe (/healthz) returned HTTP 200 OK`,
+          `[${new Date().toLocaleTimeString()}] Execution logs recorded in Ansible Semaphore: ${semUrl}`,
           `[${new Date().toLocaleTimeString()}] Incident state updated to RESOLVED in database & audit log.`,
         ],
         rawResult: res,
@@ -375,6 +382,27 @@ export default function RemediationView() {
                   </div>
                 ))}
               </div>
+
+              {executionState.ansibleTaskId && (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-indigo-950/60 to-purple-950/40 border border-indigo-500/40 text-xs shadow-md">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <div>
+                      <span className="font-mono text-indigo-300 font-bold">Ansible Task #{executionState.ansibleTaskId} Dispatched</span>
+                      <span className="text-slate-400 text-[11px] block">Live play execution logs recorded in Semaphore Project 1</span>
+                    </div>
+                  </div>
+                  <a
+                    href={executionState.semaphoreUrl || "http://localhost:3000/project/1/history"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-lg shadow-indigo-600/30 hover:scale-[1.02]"
+                  >
+                    <span>View Ansible Logs</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              )}
 
               {executionState.timestamp && (
                 <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-1">

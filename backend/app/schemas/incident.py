@@ -121,3 +121,27 @@ class IncidentHistoryResponse(BaseModel):
     new_value: Optional[str] = None
     changed_by: Optional[UUID] = None
     changed_at: Optional[datetime] = None
+
+
+class IncidentNoteCreate(BaseModel):
+    """Payload to add a collaboration note to an incident."""
+
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
+class IncidentNoteResponse(BaseModel):
+    """Response when a note is recorded."""
+
+    id: UUID
+    incident_id: UUID
+    content: str
+    author: Optional[str] = None
+    author_id: Optional[UUID] = None
+    created_at: datetime
+
+
+class IncidentAssignRequest(BaseModel):
+    """Payload to assign an incident to a user."""
+
+    assigned_to: UUID
+    note: Optional[str] = None

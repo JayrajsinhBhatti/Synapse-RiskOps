@@ -1,14 +1,16 @@
 /**
  * frontend/src/components/IncidentTimeline.jsx
- * Owner: Person 2 | Week: 6
  * 
  * Chronological incident feed and audit trail.
- * Displays state transitions (prediction -> diagnosis -> routing -> automation -> recovery),
- * MTTR calculations, severity badges, and quick status mutation triggers.
+ * Enhanced with:
+ * - Incident Ownership & Collaboration (P0 #1): One-click Acknowledge, SRE assignment, inline investigation notes
+ * - Extended status states: OPEN -> ACKNOWLEDGED -> INVESTIGATING -> REMEDIATING -> RESOLVED
+ * - Post-remediation verification trigger
  */
 
 import React, { useState, useMemo } from 'react';
 import { useIncidents, useServices, useUpdateIncidentStatus } from '../hooks/useIncidents';
+import { useAcknowledgeIncident, useAddIncidentNote, useIncidentNotes } from '../hooks/useAnalytics';
 import { useAuth } from '../context/AuthContext';
 import {
   formatTimestamp,
@@ -29,6 +31,10 @@ import {
   ShieldAlert,
   PlayCircle,
   RefreshCw,
+  User,
+  MessageSquare,
+  Send,
+  UserCheck,
 } from 'lucide-react';
 
 export default function IncidentTimeline({
@@ -39,12 +45,16 @@ export default function IncidentTimeline({
   const { data: incidentsData, isLoading, refetch } = useIncidents();
   const { data: servicesData } = useServices();
   const updateStatusMutation = useUpdateIncidentStatus();
-  const { canRemediate, openAuthModal } = useAuth();
+  const acknowledgeMutation = useAcknowledgeIncident();
+  const addNoteMutation = useAddIncidentNote();
+  const { canRemediate, openAuthModal, user } = useAuth();
 
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedId, setExpandedId] = useState(null);
+  const [notesExpandedId, setNotesExpandedId] = useState(null);
+  const [noteInputs, setNoteInputs] = useState({});
 
   const incidents = useMemo(() => {
     return Array.isArray(incidentsData) ? incidentsData : [];
@@ -88,11 +98,7 @@ export default function IncidentTimeline({
       openAuthModal();
       return;
     }
-    await updateStatusMutation.mutateAsync({
-      incidentId: inc.id,
-      status: 'INVESTIGATING',
-      comment: 'Acknowledged by on-call engineer for investigation.',
-    });
+    await acknowledgeMutation.mutateAsync(inc.id);
   };
 
   const handleResolve = async (e, inc) => {
@@ -108,9 +114,24 @@ export default function IncidentTimeline({
     });
   };
 
+  const handleAddNote = async (e, incId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const content = noteInputs[incId];
+    if (!content || !content.trim()) return;
+
+    await addNoteMutation.mutateAsync({ incidentId: incId, content });
+    setNoteInputs((prev) => ({ ...prev, [incId]: '' }));
+  };
+
   const toggleExpand = (e, id) => {
     e.stopPropagation();
     setExpandedId(expandedId === id ? null : id);
+  };
+
+  const toggleNotes = (e, id) => {
+    e.stopPropagation();
+    setNotesExpandedId(notesExpandedId === id ? null : id);
   };
 
   return (
@@ -158,8 +179,9 @@ export default function IncidentTimeline({
           >
             <option value="ALL">All Status</option>
             <option value="OPEN">Open</option>
+            <option value="ACKNOWLEDGED">Acknowledged</option>
             <option value="INVESTIGATING">Investigating</option>
-            <option value="MITIGATED">Mitigated</option>
+            <option value="REMEDIATING">Remediating</option>
             <option value="RESOLVED">Resolved</option>
           </select>
 
@@ -193,6 +215,7 @@ export default function IncidentTimeline({
           filteredIncidents.map((inc) => {
             const isSelected = selectedIncidentId === inc.id;
             const isExpanded = expandedId === inc.id;
+            const isNotesExpanded = notesExpandedId === inc.id;
             const sevBadge = getSeverityBadge(inc.severity);
             const statusBadge = getStatusBadge(inc.status);
             const serviceFriendlyName = serviceMap[inc.service_id] || inc.service_id || 'Global';
@@ -209,9 +232,9 @@ export default function IncidentTimeline({
                     : 'dark:bg-slate-900/60 bg-white border dark:border-slate-800 border-slate-200 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40 shadow-sm'
                 }`}
               >
-                {/* Top Row: Severity, Status, Service, Time */}
+                {/* Top Row: Severity, Status, Service, Owner, Time */}
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${sevBadge.bg} ${sevBadge.text} ${sevBadge.border} flex items-center gap-1`}
                     >
@@ -229,9 +252,15 @@ export default function IncidentTimeline({
                     <span className="text-[10px] dark:text-slate-300 text-slate-700 font-semibold px-2 py-0.5 rounded dark:bg-slate-800 bg-slate-100 border dark:border-slate-700 border-slate-200">
                       {serviceFriendlyName}
                     </span>
+
+                    {/* SRE Owner Badge */}
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded dark:bg-purple-500/15 bg-purple-50 text-purple-400 border border-purple-500/25 flex items-center gap-1">
+                      <User className="w-2.5 h-2.5" />
+                      {inc.assigned_to ? 'Assigned' : 'Unassigned'}
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-1 text-[11px] dark:text-slate-400 text-slate-500">
+                  <div className="flex items-center gap-1 text-[11px] dark:text-slate-400 text-slate-500 shrink-0">
                     <Clock className="w-3 h-3" />
                     <span>{formatTimeAgo(inc.created_at || inc.detected_at)}</span>
                   </div>
@@ -245,20 +274,21 @@ export default function IncidentTimeline({
                   {inc.description}
                 </p>
 
-                {/* Bottom Row: Actions & Audit Toggle */}
+                {/* Bottom Row: Actions, Collaboration Notes, Audit Toggle */}
                 <div className="flex items-center justify-between pt-2 border-t dark:border-slate-800/80 border-slate-200 text-[11px]">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     {inc.status === 'OPEN' && (
                       <button
                         onClick={(e) => handleAcknowledge(e, inc)}
-                        disabled={updateStatusMutation.isPending}
-                        className="px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-600 dark:text-amber-300 font-medium border border-amber-500/30 transition-colors"
+                        disabled={acknowledgeMutation.isPending}
+                        className="px-2.5 py-1 rounded-md bg-purple-500/20 hover:bg-purple-500/30 text-purple-600 dark:text-purple-300 font-semibold border border-purple-500/30 transition-colors flex items-center gap-1"
                       >
+                        <UserCheck className="w-3 h-3" />
                         Acknowledge
                       </button>
                     )}
 
-                    {(inc.status === 'OPEN' || inc.status === 'INVESTIGATING') && (
+                    {(inc.status === 'OPEN' || inc.status === 'ACKNOWLEDGED' || inc.status === 'INVESTIGATING') && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -272,7 +302,7 @@ export default function IncidentTimeline({
                       </button>
                     )}
 
-                    {inc.status === 'MITIGATED' && (
+                    {inc.status === 'REMEDIATING' && (
                       <button
                         onClick={(e) => handleResolve(e, inc)}
                         disabled={updateStatusMutation.isPending}
@@ -289,19 +319,64 @@ export default function IncidentTimeline({
                     )}
                   </div>
 
-                  {/* Audit Trail Expand Toggle */}
-                  <button
-                    onClick={(e) => toggleExpand(e, inc.id)}
-                    className="dark:text-slate-400 text-slate-500 dark:hover:text-white hover:text-slate-900 flex items-center gap-0.5 text-[10px]"
-                  >
-                    <span>Audit Trail</span>
-                    {isExpanded ? (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    )}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {/* Collaboration Notes Toggle */}
+                    <button
+                      onClick={(e) => toggleNotes(e, inc.id)}
+                      className="dark:text-slate-400 text-slate-500 dark:hover:text-white hover:text-slate-900 flex items-center gap-1 text-[10px]"
+                    >
+                      <MessageSquare className="w-3 h-3 text-cyan-400" />
+                      <span>Notes</span>
+                    </button>
+
+                    {/* Audit Trail Expand Toggle */}
+                    <button
+                      onClick={(e) => toggleExpand(e, inc.id)}
+                      className="dark:text-slate-400 text-slate-500 dark:hover:text-white hover:text-slate-900 flex items-center gap-0.5 text-[10px]"
+                    >
+                      <span>Audit</span>
+                      {isExpanded ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
+
+                {/* Collaboration Notes Drawer */}
+                {isNotesExpanded && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="mt-3 pt-3 border-t dark:border-slate-800 border-slate-200 space-y-2.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between text-[10px] font-bold dark:text-slate-400 text-slate-500 uppercase tracking-wider">
+                      <span>Investigation Notes & Comments</span>
+                    </div>
+
+                    <form
+                      onSubmit={(e) => handleAddNote(e, inc.id)}
+                      className="flex items-center gap-2"
+                    >
+                      <input
+                        type="text"
+                        placeholder="Add on-call observation or hypothesis..."
+                        value={noteInputs[inc.id] || ''}
+                        onChange={(e) =>
+                          setNoteInputs({ ...noteInputs, [inc.id]: e.target.value })
+                        }
+                        className="flex-1 text-[11px] px-2.5 py-1.5 rounded-lg dark:bg-slate-950 bg-white border dark:border-slate-800 border-slate-300 dark:text-white text-slate-900 focus:outline-none focus:border-cyan-400"
+                      />
+                      <button
+                        type="submit"
+                        disabled={addNoteMutation.isPending}
+                        className="p-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition-colors"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    </form>
+                  </div>
+                )}
 
                 {/* Expanded Audit Trail Drawer */}
                 {isExpanded && (
@@ -309,7 +384,7 @@ export default function IncidentTimeline({
                     <span className="text-[10px] font-bold dark:text-slate-400 text-slate-500 uppercase tracking-wider block">
                       Chronological State Transitions
                     </span>
-                    {(!inc.history || inc.history.length === 0) ? (
+                    {!inc.history || inc.history.length === 0 ? (
                       <div className="text-[10px] text-slate-500 italic">
                         Initial incident ingestion logged. No further transitions yet.
                       </div>
@@ -321,7 +396,9 @@ export default function IncidentTimeline({
                         >
                           <div className="flex items-center justify-between dark:text-slate-400 text-slate-600">
                             <span className="font-semibold dark:text-slate-300 text-slate-800">
-                              {hist.action || 'MUTATION'}: {hist.old_value || 'OPEN'} <ArrowRight className="w-2.5 h-2.5 inline mx-1" /> {hist.new_value || hist.action}
+                              {hist.action || 'MUTATION'}: {hist.old_value || 'OPEN'}{' '}
+                              <ArrowRight className="w-2.5 h-2.5 inline mx-1" />{' '}
+                              {hist.new_value || hist.action}
                             </span>
                             <span>{formatTimestamp(hist.changed_at || hist.timestamp)}</span>
                           </div>

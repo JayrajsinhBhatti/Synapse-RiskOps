@@ -116,6 +116,14 @@ export function getStatusBadge(status) {
         dot: 'bg-red-400 animate-pulse',
         label: 'Open',
       };
+    case 'acknowledged':
+      return {
+        bg: 'bg-purple-500/20',
+        text: 'text-purple-300',
+        border: 'border-purple-500/40',
+        dot: 'bg-purple-400',
+        label: 'Acknowledged',
+      };
     case 'investigating':
       return {
         bg: 'bg-amber-500/20',
@@ -123,6 +131,14 @@ export function getStatusBadge(status) {
         border: 'border-amber-500/40',
         dot: 'bg-amber-400 animate-ping',
         label: 'Investigating',
+      };
+    case 'remediating':
+      return {
+        bg: 'bg-cyan-500/20',
+        text: 'text-cyan-300',
+        border: 'border-cyan-500/40',
+        dot: 'bg-cyan-400 animate-pulse',
+        label: 'Remediating',
       };
     case 'mitigated':
       return {

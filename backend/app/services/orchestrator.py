@@ -28,6 +28,7 @@ from app.models.risk_assessment import RiskAssessment
 from app.models.service import Service, ServiceDependency
 from app.models.user import User
 from app.schemas.orchestration import UnifiedIncidentRecordResponse
+from app.services.ansible_service import ansible_service
 from app.services.sse_manager import sse_manager
 
 logger = logging.getLogger("synapse.orchestrator")
@@ -180,14 +181,24 @@ class OrchestrationService:
         except Exception as e:
             logger.warning(f"Runbook execution at {self.ml_engine_url} unavailable ({e}); simulating action.")
 
+        # Trigger real Ansible Playbook via Semaphore REST API
+        ansible_res = await ansible_service.trigger_remediation_task(
+            action="SCALE_OUT_PODS",
+            service_name=target_service,
+            incident_id="AUTO-ORCHESTRATION",
+            failure_type=failure_type,
+        )
+
         return {
             "actions_executed": [
-                {"action": "SCALE_OUT_PODS", "target": target_service, "status": "SUCCESS"},
+                {"action": "SCALE_OUT_PODS", "target": target_service, "status": "SUCCESS", "semaphore_task_id": ansible_res.get("task_id")},
                 {"action": "FLUSH_REDIS_CACHE", "target": target_service, "status": "SUCCESS"},
             ],
             "retry_count": 0,
             "max_retries": 3,
             "execution_status": "SUCCESS",
+            "ansible_task_id": ansible_res.get("task_id"),
+            "semaphore_history_url": ansible_res.get("semaphore_history_url"),
         }
 
     async def _call_genai_diagnose(

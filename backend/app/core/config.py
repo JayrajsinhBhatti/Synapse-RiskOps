@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     N8N_WEBHOOK_URL: str = (
         "http://n8n:5678/webhook/riskops-incident" if Path("/.dockerenv").exists() else "http://localhost:5678/webhook/riskops-incident"
     )
+    SEMAPHORE_URL: str = (
+        "http://semaphore:3000" if Path("/.dockerenv").exists() else "http://localhost:3000"
+    )
+    SEMAPHORE_API_TOKEN: str = "hegkfuqjxkcud_yz0fngh-1o6rrifhvqwl3yi9cvzje="
+    SEMAPHORE_PROJECT_ID: int = 1
 
     # CORS Origins
     CORS_ORIGINS: List[str] = [

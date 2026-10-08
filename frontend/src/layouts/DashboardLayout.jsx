@@ -1,23 +1,23 @@
 /**
  * frontend/src/layouts/DashboardLayout.jsx
- * Owner: Person 2 | Week: 6+
  * 
  * Premium SaaS Application Shell with Sidebar Navigation.
- * Includes:
- * - Collapsible sidebar with icon-based nav
+ * Enhanced to address UX Weaknesses and Major Product Gaps:
+ * - Universal Search Modal (Cmd+K / Ctrl+K)
+ * - Notification Preferences & Webhook Integrations Hub
+ * - Reliability Analytics Navigation
  * - Live SSE connection heartbeat
- * - System health KPI strip in header
- * - User profile with RBAC role badge
- * - Simulation triggers
- * - Jayraj's Ops Chatbot Co-Pilot
+ * - RBAC user profile & dark/light theme toggle
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSSE } from '../hooks/useSSE';
 import AuthModal from '../components/AuthModal';
 import SimulateAlertModal from '../components/SimulateAlertModal';
 import ChatWidget from '../components/chatbot/ChatWidget';
+import GlobalSearchModal from '../components/common/GlobalSearchModal';
+import NotificationPreferencesModal from '../components/common/NotificationPreferencesModal';
 import {
   Shield,
   Activity,
@@ -45,6 +45,9 @@ import {
   History,
   Sun,
   Moon,
+  Timer,
+  Command,
+  Flame,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -53,14 +56,16 @@ const NAV_SECTIONS = [
     heading: 'Operations',
     items: [
       { id: 'command-center', label: 'Command Center', icon: Layers, description: 'Unified telemetry & KPIs' },
+      { id: 'chaos', label: 'Telemetry Proof (Demo)', icon: Flame, description: 'Live Before/After proof' },
       { id: 'incidents', label: 'Incidents & Audit', icon: AlertOctagon, description: 'Incident triage & history' },
       { id: 'topology', label: 'Topology Map', icon: Network, description: 'Service dependency graph' },
+      { id: 'analytics', label: 'Reliability Analytics', icon: Timer, description: 'Computed MTTR & scorecard' },
     ],
   },
   {
     heading: 'Intelligence',
     items: [
-      { id: 'risk', label: 'Risk Analytics', icon: BarChart3, description: 'Risk scores & telemetry' },
+      { id: 'risk', label: 'Risk Ranking', icon: BarChart3, description: 'Risk scores & telemetry' },
       { id: 'rca', label: 'Root Cause (RCA)', icon: Brain, description: 'Autonomous causal graph' },
       { id: 'risk-history', label: 'Risk History', icon: History, description: 'Model evaluations log' },
     ],
@@ -81,7 +86,21 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
   const { isConnected, status: sseStatus } = useSSE();
   const { toggleTheme, isDark } = useTheme();
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Global Keyboard Shortcut: Cmd+K / Ctrl+K
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsSearchModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleLogout = () => {
     if (onLogout) onLogout();
@@ -114,7 +133,7 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
                 </span>
               </div>
               <span className="text-[10px] font-mono dark:text-slate-500 text-slate-400 whitespace-nowrap">
-                v0.6.0 • Enterprise
+                v0.7.0 • Enterprise SRE
               </span>
             </div>
           )}
@@ -233,8 +252,30 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
               </span>
             </div>
 
-            {/* Right: Actions & User Profile */}
+            {/* Right: Actions, Search, Notifications & User Profile */}
             <div className="flex items-center gap-2">
+              {/* Universal Search Button */}
+              <button
+                onClick={() => setIsSearchModalOpen(true)}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border dark:border-slate-800 border-slate-200 dark:bg-slate-900/60 bg-slate-50 dark:text-slate-400 text-slate-500 hover:text-slate-900 dark:hover:text-white text-xs transition-colors"
+                title="Universal Search (Cmd+K)"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span className="text-[11px] hidden sm:inline">Search...</span>
+                <kbd className="text-[9px] font-mono px-1 py-0.5 rounded dark:bg-slate-800 bg-slate-200 text-slate-500">
+                  ⌘K
+                </kbd>
+              </button>
+
+              {/* Notification Preferences */}
+              <button
+                onClick={() => setIsNotificationsModalOpen(true)}
+                className="p-1.5 rounded-lg border dark:border-slate-800 border-slate-200 dark:text-slate-400 text-slate-600 hover:text-slate-900 dark:hover:text-white transition-colors"
+                title="Notification & Webhook Preferences"
+              >
+                <Bell className="w-4 h-4" />
+              </button>
+
               {/* Dark / Light Mode Toggle */}
               <button
                 onClick={toggleTheme}
@@ -311,6 +352,17 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
       <SimulateAlertModal
         isOpen={isSimulateModalOpen}
         onClose={() => setIsSimulateModalOpen(false)}
+      />
+      <GlobalSearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        onNavigate={(viewId) => {
+          onViewChange(viewId);
+        }}
+      />
+      <NotificationPreferencesModal
+        isOpen={isNotificationsModalOpen}
+        onClose={() => setIsNotificationsModalOpen(false)}
       />
 
       {/* Jayraj's Ops Chatbot Co-Pilot Widget */}

@@ -21,6 +21,8 @@ from app.api.incidents import router as incidents_router
 from app.api.services import router as services_router
 from app.api.risk_assessments import router as risk_assessments_router
 from app.api.pipeline import router as pipeline_router
+from app.api.analytics import router as analytics_router
+from app.api.chaos import router as chaos_router
 
 
 @asynccontextmanager
@@ -48,6 +50,8 @@ app.include_router(incidents_router)
 app.include_router(services_router)
 app.include_router(risk_assessments_router)
 app.include_router(pipeline_router)
+app.include_router(analytics_router)
+app.include_router(chaos_router)
 
 # =====================================================
 # CORS Middleware

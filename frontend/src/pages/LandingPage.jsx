@@ -13,6 +13,7 @@
 
 import React from 'react';
 import HeroVideoSection from '../components/landing/HeroVideoSection';
+import ProjectWorkflowSection from '../components/landing/ProjectWorkflowSection';
 import FeaturesBentoSection from '../components/landing/FeaturesBentoSection';
 import HowItWorksStepsSection from '../components/landing/HowItWorksStepsSection';
 import StackIntegrationsSection from '../components/landing/StackIntegrationsSection';
@@ -39,7 +40,10 @@ export default function LandingPage({ onLaunchApp, onSignIn, onGetStarted }) {
         onLaunchApp={onLaunchApp}
       />
 
-      {/* 2. BENTO-GRID CORE CAPABILITIES */}
+      {/* 2. COMPLETE END-TO-END PROJECT WORKFLOW (BEFORE CORE AI & ORCHESTRATION ENGINE) */}
+      <ProjectWorkflowSection onGetStarted={handleGetStarted} />
+
+      {/* 3. BENTO-GRID CORE CAPABILITIES */}
       <FeaturesBentoSection />
 
       {/* 3. 3-STEP AUTONOMOUS PIPELINE JOURNEY */}
