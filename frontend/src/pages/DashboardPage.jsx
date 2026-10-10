@@ -24,6 +24,7 @@ import ServiceMetricsViewer from '../components/observability/ServiceMetricsView
 import ChaosExperimentDashboard from '../components/chaos/ChaosExperimentDashboard';
 import { useIncidents, useServices } from '../hooks/useIncidents';
 import { useReliabilityMetrics } from '../hooks/useAnalytics';
+import { useWorkspace } from '../context/WorkspaceContext';
 import {
   AlertCircle,
   Activity,
@@ -42,6 +43,7 @@ import {
 } from 'lucide-react';
 
 export default function DashboardPage({ activeView, onViewChange }) {
+  const { isDemoMode, openModeModal } = useWorkspace();
   const { data: incidentsData } = useIncidents();
   const { data: servicesData } = useServices();
   const { data: reliabilityData } = useReliabilityMetrics();
@@ -68,7 +70,11 @@ export default function DashboardPage({ activeView, onViewChange }) {
 
   const handleSelectService = (serviceId) => {
     setSelectedServiceId(serviceId);
-    const matchingIncident = activeIncidents.find((i) => i.service_id === serviceId);
+    const matchedService = services.find((s) => s.id === serviceId || s.service_name === serviceId);
+    const svcName = matchedService ? (matchedService.service_name || matchedService.name) : serviceId;
+    const matchingIncident = activeIncidents.find(
+      (i) => i.service_id === serviceId || i.root_cause === svcName || (i.title && i.title.toLowerCase().includes(String(svcName).toLowerCase()))
+    );
     if (matchingIncident) {
       setSelectedIncident(matchingIncident);
     }
@@ -76,7 +82,7 @@ export default function DashboardPage({ activeView, onViewChange }) {
 
   const selectedServiceName = useMemo(() => {
     if (!selectedServiceId) return 'payment-service';
-    const s = services.find((srv) => srv.id === selectedServiceId);
+    const s = services.find((srv) => srv.id === selectedServiceId || srv.service_name === selectedServiceId);
     return s ? s.service_name || s.name : 'payment-service';
   }, [selectedServiceId, services]);
 
@@ -108,7 +114,7 @@ export default function DashboardPage({ activeView, onViewChange }) {
       <div className="h-[calc(100vh-120px)] flex flex-col gap-4 animate-in">
         <DependencyGraphView
           selectedServiceId={selectedServiceId}
-          activeIncidentServiceId={selectedIncident?.service_id}
+          activeIncidentServiceId={selectedIncident?.service_id || activeIncidents[0]?.service_id}
           onSelectService={handleSelectService}
         />
       </div>
@@ -163,21 +169,28 @@ export default function DashboardPage({ activeView, onViewChange }) {
   // View: Risk Analytics Full View
   if (activeView === 'risk') {
     return (
-      <div className="h-[calc(100vh-120px)] flex flex-col gap-6 animate-in">
-        <div className="h-[480px]">
-          <RiskScorePanel
-            onSelectService={handleSelectService}
-            selectedServiceId={selectedServiceId}
-          />
-        </div>
-        <div className="flex-1 glass-card p-5">
-          <h3 className="text-sm font-bold dark:text-white text-slate-900 mb-3">Service Health Diagnostics</h3>
-          <div className="grid grid-cols-3 gap-3 overflow-y-auto max-h-[220px]">
+      <div className="space-y-6 pb-12 animate-in">
+        <RiskScorePanel
+          onSelectService={handleSelectService}
+          selectedServiceId={selectedServiceId}
+        />
+        <div className="glass-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold dark:text-white text-slate-900">Service Health Diagnostics</h3>
+            <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full dark:bg-slate-800 bg-slate-100 text-slate-500 dark:text-slate-400">
+              {services.length} services monitored
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[360px] overflow-y-auto pr-1">
             {services.map((svc) => (
               <div
                 key={svc.id}
                 onClick={() => handleSelectService(svc.id)}
-                className="p-3 rounded-xl dark:bg-slate-900/60 bg-slate-50 border dark:border-slate-800 border-slate-200 hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer flex items-center justify-between transition-all hover:bg-slate-100 dark:hover:bg-slate-800/40"
+                className={`p-3 rounded-xl dark:bg-slate-900/60 bg-slate-50 border cursor-pointer flex items-center justify-between transition-all hover:bg-slate-100 dark:hover:bg-slate-800/40 ${
+                  selectedServiceId === svc.id
+                    ? 'border-synapse-500 ring-1 ring-synapse-500/50 bg-synapse-500/10'
+                    : 'dark:border-slate-800 border-slate-200 hover:border-slate-300 dark:hover:border-slate-700'
+                }`}
               >
                 <div>
                   <div className="font-semibold text-xs dark:text-white text-slate-900">{svc.name || svc.service_name}</div>
@@ -238,6 +251,31 @@ export default function DashboardPage({ activeView, onViewChange }) {
   // Default: Command Center Unified View
   return (
     <div className="space-y-6">
+      {/* Simulation / Demo Dataset Awareness Banner */}
+      {isDemoMode && (
+        <div className="p-3.5 rounded-2xl dark:bg-amber-500/10 bg-amber-50 border dark:border-amber-500/25 border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+            <div>
+              <span className="font-extrabold text-amber-700 dark:text-amber-400 mr-1.5 uppercase font-mono text-[11px]">
+                Simulation Dataset Active:
+              </span>
+              <span className="dark:text-slate-300 text-slate-700 text-[11px]">
+                Operating on fixed demo dataset and sample microservice topology. Real telemetry is completely isolated.
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openModeModal}
+            className="px-3 py-1 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shadow-sm flex items-center gap-1 shrink-0 self-start sm:self-auto transition-all"
+          >
+            <span>Connect Live Services</span>
+            <span>&rarr;</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Telemetry KPIs Banner */}
       <div className="grid grid-cols-4 gap-4">
         {kpiCards.map((kpi, i) => {
@@ -324,11 +362,11 @@ export default function DashboardPage({ activeView, onViewChange }) {
           </div>
 
           {/* Primary Visualization Container */}
-          <div className="h-[460px] animate-in">
+          <div className={`${commandCenterLeftTab === 'topology' ? 'h-[520px]' : 'min-h-[480px]'} animate-in`}>
             {commandCenterLeftTab === 'topology' ? (
               <DependencyGraphView
                 selectedServiceId={selectedServiceId}
-                activeIncidentServiceId={selectedIncident?.service_id}
+                activeIncidentServiceId={selectedIncident?.service_id || activeIncidents[0]?.service_id}
                 onSelectService={handleSelectService}
               />
             ) : commandCenterLeftTab === 'metrics' ? (

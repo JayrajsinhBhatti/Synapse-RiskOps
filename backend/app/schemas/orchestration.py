@@ -21,6 +21,7 @@ class AnomalyDiagnosisRequest(BaseModel):
     metrics: Dict[str, float] = Field(..., description="Current telemetry metrics snapshot")
     scenario_id: Optional[str] = Field(default=None, description="Optional simulated scenario identifier")
     assigned_to: Optional[UUID] = None
+    data_mode: Optional[str] = "demo"
 
 
 class RankedRootCauseCandidate(BaseModel):

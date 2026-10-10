@@ -8,7 +8,16 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { useRiskAssessments, useServices } from '../../hooks/useIncidents';
+import {
+  useRiskAssessments,
+  useServices,
+  useDeleteRiskAssessment,
+  useDeleteAllRiskAssessments,
+  useRetentionSettings,
+  useUpdateRetentionSettings,
+} from '../../hooks/useIncidents';
+import { useAuth } from '../../context/AuthContext';
+import { useWorkspace } from '../../context/WorkspaceContext';
 import {
   BarChart3,
   TrendingUp,
@@ -19,14 +28,26 @@ import {
   Clock,
   Sparkles,
   Calendar,
+  Trash2,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 
 export default function RiskHistoryView() {
+  const { role } = useAuth();
+  const { mode } = useWorkspace();
   const { data: assessmentsData, isLoading } = useRiskAssessments({ limit: 100 });
   const { data: servicesData } = useServices();
+  const deleteRecordMutation = useDeleteRiskAssessment();
+  const deleteAllMutation = useDeleteAllRiskAssessments();
+  const { data: retentionData } = useRetentionSettings();
+  const updateRetentionMutation = useUpdateRetentionSettings();
 
   const [selectedServiceId, setSelectedServiceId] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
+  const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('');
+  const [deleteError, setDeleteError] = useState(null);
 
   const assessments = Array.isArray(assessmentsData) ? assessmentsData : [];
   const services = Array.isArray(servicesData) ? servicesData : [];
@@ -104,6 +125,40 @@ export default function RiskHistoryView() {
               </option>
             ))}
           </select>
+
+          {/* Time-based Log Retention Dropdown */}
+          <div className="flex items-center gap-1.5 dark:bg-slate-950 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-xl px-2.5 py-1.5 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+            <span className="text-[10px] font-mono dark:text-slate-400 text-slate-500 hidden sm:inline">Retention:</span>
+            <select
+              value={retentionData?.risk_assessments_policy || 'all'}
+              onChange={(e) => updateRetentionMutation.mutate({ risk_assessments_policy: e.target.value })}
+              disabled={updateRetentionMutation.isPending}
+              className="bg-transparent text-xs font-semibold dark:text-slate-200 text-slate-800 focus:outline-none cursor-pointer"
+              title="Time-based Log Retention: older evaluations are automatically pruned"
+            >
+              <option value="1d">1 Day</option>
+              <option value="7d">7 Days</option>
+              <option value="30d">30 Days</option>
+              <option value="90d">90 Days</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+
+          {/* Purge All Risk Evaluations Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setDeleteAllConfirmText('');
+              setIsDeleteAllModalOpen(true);
+            }}
+            className="px-2.5 py-1.5 rounded-xl border dark:border-rose-500/30 border-rose-200 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            title="Purge all risk evaluation records for the active mode"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Purge All</span>
+          </button>
         </div>
       </div>
 
@@ -120,12 +175,13 @@ export default function RiskHistoryView() {
                 <th className="py-3 px-4">AI Confidence</th>
                 <th className="py-3 px-4">Model Version</th>
                 <th className="py-3 px-4">Evaluation Status</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-white/[0.04] divide-slate-100 dark:text-slate-300 text-slate-700">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500 font-mono">
+                  <td colSpan={8} className="py-12 text-center text-slate-500 font-mono">
                     No risk assessment records found matching current filter criteria.
                   </td>
                 </tr>
@@ -176,6 +232,21 @@ export default function RiskHistoryView() {
                           VERIFIED
                         </span>
                       </td>
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm('Delete this risk evaluation record?')) {
+                              deleteRecordMutation.mutate(item.id);
+                            }
+                          }}
+                          disabled={deleteRecordMutation.isPending}
+                          className="p-1 rounded text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                          title="Delete risk evaluation entry"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -184,6 +255,91 @@ export default function RiskHistoryView() {
           </table>
         </div>
       </div>
+
+      {/* ========================================================
+          CONFIRMATION MODAL: PURGE ALL RISK HISTORY
+         ======================================================== */}
+      {isDeleteAllModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md dark:bg-slate-900 bg-white rounded-2xl border dark:border-rose-500/40 border-rose-300 shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-sm">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+                <span>Purge All Risk History ({mode.toUpperCase()} Mode)</span>
+              </div>
+              <button
+                onClick={() => setIsDeleteAllModalOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl dark:bg-rose-950/30 bg-rose-50 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs space-y-1">
+              <span className="font-bold block">Danger Zone: Irreversible Action</span>
+              <p className="text-[11px] leading-relaxed">
+                This will delete ALL historical risk assessment evaluations currently registered under the{' '}
+                <strong>{mode}</strong> data mode ({assessments.length} records). Records in the other mode remain preserved.
+              </p>
+            </div>
+
+            {role !== 'ADMIN' && role !== 'SRE' ? (
+              <div className="p-3 rounded-lg dark:bg-amber-950/30 bg-amber-50 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs">
+                Your role (<strong>{role || 'VIEWER'}</strong>) is not authorized to purge risk evaluations.
+                Only <strong>ADMIN</strong> or <strong>SRE</strong> roles can execute bulk purges.
+              </div>
+            ) : (
+              <div>
+                <label className="text-[11px] font-semibold dark:text-slate-300 text-slate-700 block mb-1">
+                  Type <span className="font-mono text-rose-500 font-bold">DELETE ALL</span> to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={deleteAllConfirmText}
+                  onChange={(e) => setDeleteAllConfirmText(e.target.value)}
+                  placeholder="DELETE ALL"
+                  className="w-full px-3 py-2 dark:bg-slate-950 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-xl text-xs dark:text-white text-slate-900 font-mono focus:outline-none focus:border-rose-500"
+                />
+              </div>
+            )}
+
+            {deleteError && (
+              <div className="p-3 rounded-lg dark:bg-rose-950/40 bg-rose-50 border border-rose-500/30 text-rose-500 text-xs">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t dark:border-white/5 border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsDeleteAllModalOpen(false)}
+                className="px-3 py-1.5 rounded-lg dark:bg-slate-800 bg-slate-100 text-xs font-semibold dark:text-slate-300 text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await deleteAllMutation.mutateAsync(mode);
+                    setIsDeleteAllModalOpen(false);
+                  } catch (err) {
+                    setDeleteError(err.message || 'Failed to purge risk assessments.');
+                  }
+                }}
+                disabled={
+                  deleteAllConfirmText !== 'DELETE ALL' ||
+                  deleteAllMutation.isPending ||
+                  (role !== 'ADMIN' && role !== 'SRE')
+                }
+                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleteAllMutation.isPending ? 'Purging...' : 'Confirm Purge All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

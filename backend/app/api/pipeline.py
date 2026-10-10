@@ -61,6 +61,7 @@ async def trigger_diagnosis_and_route(
         assigned_to=request.assigned_to,
         db=db,
         current_user=current_user,
+        data_mode=getattr(request, "data_mode", None) or "demo",
     )
     return record
 

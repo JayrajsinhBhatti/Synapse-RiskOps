@@ -29,6 +29,7 @@ from app.models.service import Service, ServiceDependency
 from app.models.user import User
 from app.schemas.orchestration import UnifiedIncidentRecordResponse
 from app.services.ansible_service import ansible_service
+from app.services.email_service import email_service
 from app.services.sse_manager import sse_manager
 
 logger = logging.getLogger("synapse.orchestrator")
@@ -70,6 +71,14 @@ class OrchestrationService:
         except Exception as e:
             logger.warning(f"n8n webhook dispatch failed (non-fatal): {e}")
         return False
+
+    async def _send_incident_email(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Forward incident predictive failure alert to admin via Gmail SMTP."""
+        try:
+            return await email_service.send_incident_alert(payload)
+        except Exception as e:
+            logger.warning(f"Gmail SMTP alert dispatch failed (non-fatal): {e}")
+            return {"success": False, "status": "ERROR", "detail": str(e)}
 
     async def _call_ml_engine_analyze(
         self,
@@ -251,6 +260,7 @@ class OrchestrationService:
         assigned_to: Optional[UUID] = None,
         db: Optional[AsyncSession] = None,
         current_user: Optional[User] = None,
+        data_mode: str = "demo",
     ) -> UnifiedIncidentRecordResponse:
         """
         Execute full end-to-end incident lifecycle with deduplication:
@@ -452,6 +462,7 @@ class OrchestrationService:
                     routing_decision="human_approval",
                     top_features=metrics,
                     affected_services=diagnosis_block.get("propagation_path", [service_name]),
+                    data_mode=data_mode,
                     resolved_at=None,
                     assigned_to=assigned_to,
                     created_by=user_db_id,
@@ -488,6 +499,7 @@ class OrchestrationService:
                             affected_services=diagnosis_block.get("propagation_path", [service_name]),
                             features_used=metrics,
                             model_version="v1.0.0",
+                            data_mode=data_mode,
                         )
                     )
 
@@ -520,6 +532,24 @@ class OrchestrationService:
                 "status": incident_status,
             }
             await self._send_n8n_incident(n8n_payload)
+
+            # Dispatch predictive failure alert to admin via Gmail SMTP
+            email_payload = {
+                "incident_id": str(incident_id),
+                "service_name": service_name,
+                "severity": severity,
+                "risk_score": round(risk_score, 2),
+                "failure_type": failure_type,
+                "ml_confidence": round(ml_conf, 4),
+                "rca_confidence": round(rca_conf, 4),
+                "root_cause": root_cause_str,
+                "affected_services": diagnosis_block.get("propagation_path", [service_name]),
+                "routing_decision": "human_approval",
+                "timestamp": now.isoformat(),
+                "guidance": guidance_str,
+                "metrics": metrics,
+            }
+            await self._send_incident_email(email_payload)
 
         # 7. Build unified incident record response
         return UnifiedIncidentRecordResponse(

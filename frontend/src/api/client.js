@@ -18,13 +18,15 @@ const apiClient = axios.create({
   timeout: 15000,
 });
 
-// Request Interceptor: Attach JWT Bearer Token if present
+// Request Interceptor: Attach JWT Bearer Token and Operational Data Mode if present
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('synapse_access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const mode = localStorage.getItem('synapse_operational_mode') || 'demo';
+    config.headers['X-Synapse-Mode'] = mode;
     return config;
   },
   (error) => Promise.reject(error)

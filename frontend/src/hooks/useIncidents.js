@@ -19,7 +19,19 @@ import {
   diagnoseAndRoute,
   executeRemediation,
   triggerAlert,
+  deleteIncident,
+  deleteIncidentHistory,
+  deleteAllIncidents,
+  deleteRiskAssessment,
+  deleteAllRiskAssessments,
 } from '../api/incidents';
+import {
+  getRetentionSettings,
+  updateRetentionSettings,
+  triggerRetentionPurge,
+  getSystemMode,
+  setSystemMode,
+} from '../api/system';
 
 function hasAuthToken() {
   return !!localStorage.getItem('synapse_access_token');
@@ -33,7 +45,8 @@ export function useIncidents(filters = {}) {
     queryKey: ['incidents', filters],
     queryFn: () => getIncidents(filters),
     enabled: hasAuthToken(),
-    staleTime: 10000,
+    staleTime: 4000,
+    refetchInterval: 4000,
   });
 }
 
@@ -67,7 +80,7 @@ export function useServices() {
     queryKey: ['services'],
     queryFn: () => getServices(),
     enabled: hasAuthToken(),
-    staleTime: 30000,
+    staleTime: 15000,
   });
 }
 
@@ -79,7 +92,7 @@ export function useTopology() {
     queryKey: ['topology'],
     queryFn: () => getServiceTopology(),
     enabled: hasAuthToken(),
-    staleTime: 30000,
+    staleTime: 15000,
   });
 }
 
@@ -91,7 +104,8 @@ export function useLatestRisk() {
     queryKey: ['latest-risk'],
     queryFn: () => getLatestRiskAssessments(),
     enabled: hasAuthToken(),
-    staleTime: 15000,
+    staleTime: 4000,
+    refetchInterval: 4000,
   });
 }
 
@@ -174,3 +188,166 @@ export function useDiagnoseAndRoute() {
     },
   });
 }
+
+// =====================================================
+// Deletion Operations (Individual & Bulk)
+// =====================================================
+
+/**
+ * Hook to delete an individual incident.
+ */
+export function useDeleteIncident() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (incidentId) => deleteIncident(incidentId),
+    onSuccess: (data, incidentId) => {
+      queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      queryClient.removeQueries({ queryKey: ['incident', incidentId] });
+      queryClient.removeQueries({ queryKey: ['incident-history', incidentId] });
+      queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
+      queryClient.invalidateQueries({ queryKey: ['services'] });
+    },
+  });
+}
+
+/**
+ * Hook to delete an individual audit history entry.
+ */
+export function useDeleteIncidentHistory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ historyId }) => deleteIncidentHistory(historyId),
+    onSuccess: (data, variables) => {
+      if (variables.incidentId) {
+        queryClient.invalidateQueries({ queryKey: ['incident-history', variables.incidentId] });
+        queryClient.invalidateQueries({ queryKey: ['incident', variables.incidentId] });
+      }
+      queryClient.invalidateQueries({ queryKey: ['incidents'] });
+    },
+  });
+}
+
+/**
+ * Hook to delete all incidents for the active data mode.
+ */
+export function useDeleteAllIncidents() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (mode) => deleteAllIncidents(mode),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      queryClient.invalidateQueries({ queryKey: ['incident'] });
+      queryClient.invalidateQueries({ queryKey: ['incident-history'] });
+      queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
+      queryClient.invalidateQueries({ queryKey: ['services'] });
+    },
+  });
+}
+
+/**
+ * Hook to delete an individual risk assessment record.
+ */
+export function useDeleteRiskAssessment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (assessmentId) => deleteRiskAssessment(assessmentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['risk-assessments'] });
+      queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
+    },
+  });
+}
+
+/**
+ * Hook to delete all risk assessments for the active data mode.
+ */
+export function useDeleteAllRiskAssessments() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (mode) => deleteAllRiskAssessments(mode),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['risk-assessments'] });
+      queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
+    },
+  });
+}
+
+// =====================================================
+// Retention Policy Operations
+// =====================================================
+
+/**
+ * Hook to fetch retention settings.
+ */
+export function useRetentionSettings() {
+  return useQuery({
+    queryKey: ['retention-settings'],
+    queryFn: () => getRetentionSettings(),
+    enabled: hasAuthToken(),
+    staleTime: 30000,
+  });
+}
+
+/**
+ * Hook to update retention settings and trigger time-based pruning.
+ */
+export function useUpdateRetentionSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => updateRetentionSettings(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['retention-settings'] });
+      queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      queryClient.invalidateQueries({ queryKey: ['risk-assessments'] });
+      queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
+    },
+  });
+}
+
+/**
+ * Hook to manually trigger a retention policy prune.
+ */
+export function useTriggerRetentionPurge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (module) => triggerRetentionPurge(module),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      queryClient.invalidateQueries({ queryKey: ['risk-assessments'] });
+      queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
+    },
+  });
+}
+
+// =====================================================
+// Operational Data Mode Operations
+// =====================================================
+
+/**
+ * Hook to fetch current system mode.
+ */
+export function useSystemMode() {
+  return useQuery({
+    queryKey: ['system-mode'],
+    queryFn: () => getSystemMode(),
+    enabled: hasAuthToken(),
+    staleTime: 30000,
+  });
+}
+
+/**
+ * Hook to switch operational data mode.
+ */
+export function useSetSystemMode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload) => setSystemMode(payload),
+    onSuccess: (data) => {
+      if (data?.mode) {
+        localStorage.setItem('synapse_operational_mode', data.mode);
+      }
+      queryClient.invalidateQueries();
+    },
+  });
+}
+

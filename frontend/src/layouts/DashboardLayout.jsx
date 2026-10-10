@@ -12,12 +12,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useWorkspace } from '../context/WorkspaceContext';
 import { useSSE } from '../hooks/useSSE';
 import AuthModal from '../components/AuthModal';
 import SimulateAlertModal from '../components/SimulateAlertModal';
 import ChatWidget from '../components/chatbot/ChatWidget';
 import GlobalSearchModal from '../components/common/GlobalSearchModal';
 import NotificationPreferencesModal from '../components/common/NotificationPreferencesModal';
+import WorkspaceModeModal from '../components/common/WorkspaceModeModal';
 import {
   Shield,
   Activity,
@@ -83,6 +85,7 @@ const ALL_NAV_ITEMS = NAV_SECTIONS.flatMap((s) => s.items);
 
 export default function DashboardLayout({ activeView, onViewChange, onLogout, children }) {
   const { user, isAuthenticated, role, logout, openAuthModal } = useAuth();
+  const { mode, isDemoMode, openModeModal } = useWorkspace();
   const { isConnected, status: sseStatus } = useSSE();
   const { toggleTheme, isDark } = useTheme();
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
@@ -242,14 +245,47 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
         {/* Top Application Header / Toolbar */}
         <header className="sticky top-0 z-40 dark:bg-slate-900/70 bg-white/90 backdrop-blur-xl border-b dark:border-white/[0.06] border-slate-200 px-6 h-14 flex items-center">
           <div className="w-full flex items-center justify-between gap-4">
-            {/* Left: Breadcrumb / Page Title */}
+            {/* Left: Breadcrumb / Page Title & Operational Mode Badge */}
             <div className="flex items-center gap-3">
               <h2 className="text-sm font-bold dark:text-white text-slate-900">
                 {ALL_NAV_ITEMS.find(n => n.id === activeView)?.label || 'Command Center'}
               </h2>
-              <span className="text-[10px] font-mono dark:text-slate-500 text-slate-500 dark:bg-slate-800/60 bg-slate-100 border dark:border-transparent border-slate-200 px-2 py-0.5 rounded-md">
+              <span className="text-[10px] font-mono dark:text-slate-500 text-slate-500 dark:bg-slate-800/60 bg-slate-100 border dark:border-transparent border-slate-200 px-2 py-0.5 rounded-md hidden md:inline">
                 {ALL_NAV_ITEMS.find(n => n.id === activeView)?.description || 'Unified operations view'}
               </span>
+
+              {/* Operational Mode Badge with Reconfigure Action */}
+              <button
+                type="button"
+                onClick={openModeModal}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-mono font-bold transition-all shadow-sm ${
+                  isDemoMode
+                    ? 'dark:bg-amber-500/15 bg-amber-50 hover:bg-amber-100 dark:hover:bg-amber-500/25 border-amber-500/40 text-amber-700 dark:text-amber-400'
+                    : 'dark:bg-emerald-500/15 bg-emerald-50 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
+                }`}
+                title="Click to switch or reconfigure operational data mode"
+              >
+                {isDemoMode ? (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                    <span>SIMULATION DATA</span>
+                    <span className="text-[9px] uppercase tracking-wider bg-amber-500/20 px-1 py-0.5 rounded border border-amber-500/30 text-amber-600 dark:text-amber-300">
+                      Demo Mode
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    </span>
+                    <span>LIVE CONNECTED</span>
+                    <span className="text-[9px] uppercase tracking-wider bg-emerald-500/20 px-1 py-0.5 rounded border border-emerald-500/30 text-emerald-600 dark:text-emerald-300">
+                      Telemetry
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Right: Actions, Search, Notifications & User Profile */}
@@ -364,6 +400,7 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
         isOpen={isNotificationsModalOpen}
         onClose={() => setIsNotificationsModalOpen(false)}
       />
+      <WorkspaceModeModal />
 
       {/* Jayraj's Ops Chatbot Co-Pilot Widget */}
       <ChatWidget />

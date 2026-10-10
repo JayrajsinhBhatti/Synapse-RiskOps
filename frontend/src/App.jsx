@@ -13,6 +13,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { WorkspaceProvider } from './context/WorkspaceContext';
 import { ChatbotProvider } from './context/ChatbotContext';
 import DashboardLayout from './layouts/DashboardLayout';
 import DashboardPage from './pages/DashboardPage';
@@ -144,9 +145,11 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <ChatbotProvider>
-            <AppRouter />
-          </ChatbotProvider>
+          <WorkspaceProvider>
+            <ChatbotProvider>
+              <AppRouter />
+            </ChatbotProvider>
+          </WorkspaceProvider>
         </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>

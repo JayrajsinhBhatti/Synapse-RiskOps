@@ -60,6 +60,16 @@ class Settings(BaseSettings):
         "http://localhost:8080",
     ]
 
+    # Gmail SMTP Email Alerting Settings
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = "spareid9687@gmail.com"
+    SMTP_PASSWORD: str = ""
+    GMAIL_APP_PASSWORD: str = ""
+    ADMIN_EMAIL: str = "jayrajsinhbhatti9687@gmail.com"
+    SMTP_USE_TLS: bool = True
+    EMAIL_NOTIFICATIONS_ENABLED: bool = True
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

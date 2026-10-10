@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     routing_decision    VARCHAR(50),
     top_features        JSONB,
     affected_services   JSONB,
+    data_mode           VARCHAR(20) NOT NULL DEFAULT 'demo',
     detected_at         TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     resolved_at         TIMESTAMP WITH TIME ZONE,
     assigned_to         UUID REFERENCES users(id),
@@ -107,8 +108,39 @@ CREATE TABLE IF NOT EXISTS risk_assessments (
     affected_services       TEXT[],
     features_used           JSONB,
     model_version           VARCHAR(50),
+    data_mode               VARCHAR(20) NOT NULL DEFAULT 'demo',
     assessed_at             TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- =====================================================
+-- RETENTION POLICIES TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS retention_policies (
+    module                  VARCHAR(50) PRIMARY KEY,
+    retention_period        VARCHAR(20) NOT NULL DEFAULT 'all',
+    auto_purge_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+    last_purged_at          TIMESTAMP WITH TIME ZONE,
+    records_purged_last     INT DEFAULT 0,
+    updated_at              TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+INSERT INTO retention_policies (module, retention_period) VALUES
+    ('incidents', 'all'),
+    ('risk_assessments', 'all')
+ON CONFLICT (module) DO NOTHING;
+
+-- =====================================================
+-- WORKSPACE SETTINGS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS workspace_settings (
+    key         VARCHAR(50) PRIMARY KEY,
+    value       JSONB NOT NULL,
+    updated_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Idempotent column migrations for existing containers
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS data_mode VARCHAR(20) NOT NULL DEFAULT 'demo';
+ALTER TABLE risk_assessments ADD COLUMN IF NOT EXISTS data_mode VARCHAR(20) NOT NULL DEFAULT 'demo';
 
 -- =====================================================
 -- INDEXES
@@ -117,8 +149,10 @@ CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_severity ON incidents(severity);
 CREATE INDEX IF NOT EXISTS idx_incidents_service ON incidents(service_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_detected ON incidents(detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_incidents_data_mode ON incidents(data_mode);
 CREATE INDEX IF NOT EXISTS idx_risk_assessments_service ON risk_assessments(service_id);
 CREATE INDEX IF NOT EXISTS idx_risk_assessments_assessed ON risk_assessments(assessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_risk_assessments_data_mode ON risk_assessments(data_mode);
 CREATE INDEX IF NOT EXISTS idx_service_deps_source ON service_dependencies(source_service_id);
 CREATE INDEX IF NOT EXISTS idx_service_deps_target ON service_dependencies(target_service_id);
 CREATE INDEX IF NOT EXISTS idx_incident_history_incident ON incident_history(incident_id);

@@ -55,18 +55,38 @@ export function useSSE() {
         setRecentEvents((prev) => [eventItem, ...prev.slice(0, 49)]);
 
         // Intelligent React Query Cache Invalidation
-        if (eventName === 'incident_created' || eventName === 'incident_updated') {
+        if (eventName === 'incident_created' || eventName === 'incident_updated' || eventName === 'incident_deleted') {
           queryClient.invalidateQueries({ queryKey: ['incidents'] });
           queryClient.invalidateQueries({ queryKey: ['services'] });
           queryClient.invalidateQueries({ queryKey: ['topology'] });
+          queryClient.invalidateQueries({ queryKey: ['analytics'] });
           if (payload?.data?.id) {
             queryClient.invalidateQueries({ queryKey: ['incident', payload.data.id] });
             queryClient.invalidateQueries({ queryKey: ['incident-history', payload.data.id] });
           }
-        } else if (eventName === 'risk_assessment') {
+        } else if (eventName === 'risk_alert' || eventName === 'risk_assessment') {
+          queryClient.invalidateQueries({ queryKey: ['incidents'] });
           queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
           queryClient.invalidateQueries({ queryKey: ['services'] });
           queryClient.invalidateQueries({ queryKey: ['topology'] });
+          queryClient.invalidateQueries({ queryKey: ['analytics'] });
+        } else if (eventName === 'system_mode_changed') {
+          queryClient.invalidateQueries();
+          if (payload?.mode) {
+            localStorage.setItem('synapse_operational_mode', payload.mode);
+            window.dispatchEvent(new CustomEvent('synapse:mode-changed', { detail: payload }));
+          }
+        } else if (
+          eventName === 'retention_purged' ||
+          eventName === 'incidents_bulk_deleted' ||
+          eventName === 'risk_assessments_bulk_deleted' ||
+          eventName === 'risk_assessment_deleted' ||
+          eventName === 'incident_history_deleted'
+        ) {
+          queryClient.invalidateQueries({ queryKey: ['incidents'] });
+          queryClient.invalidateQueries({ queryKey: ['risk-assessments'] });
+          queryClient.invalidateQueries({ queryKey: ['latest-risk'] });
+          queryClient.invalidateQueries({ queryKey: ['analytics'] });
         }
       } catch (err) {
         console.warn(`Error parsing SSE ${eventName} event:`, err);
@@ -91,8 +111,40 @@ export function useSSE() {
       handleEvent('incident_updated', e);
     });
 
+    es.addEventListener('incident_deleted', (e) => {
+      handleEvent('incident_deleted', e);
+    });
+
+    es.addEventListener('risk_alert', (e) => {
+      handleEvent('risk_alert', e);
+    });
+
     es.addEventListener('risk_assessment', (e) => {
       handleEvent('risk_assessment', e);
+    });
+
+    es.addEventListener('system_mode_changed', (e) => {
+      handleEvent('system_mode_changed', e);
+    });
+
+    es.addEventListener('retention_purged', (e) => {
+      handleEvent('retention_purged', e);
+    });
+
+    es.addEventListener('incidents_bulk_deleted', (e) => {
+      handleEvent('incidents_bulk_deleted', e);
+    });
+
+    es.addEventListener('risk_assessments_bulk_deleted', (e) => {
+      handleEvent('risk_assessments_bulk_deleted', e);
+    });
+
+    es.addEventListener('risk_assessment_deleted', (e) => {
+      handleEvent('risk_assessment_deleted', e);
+    });
+
+    es.addEventListener('incident_history_deleted', (e) => {
+      handleEvent('incident_history_deleted', e);
     });
   }, [queryClient]);
 

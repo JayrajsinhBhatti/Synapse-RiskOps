@@ -38,6 +38,8 @@ class IncidentCreate(BaseModel):
 
     predicted_failure: Optional[datetime] = None
 
+    data_mode: Optional[str] = "demo"
+
 
 class IncidentUpdate(BaseModel):
     """Fields that can be updated on an incident."""
@@ -98,6 +100,7 @@ class IncidentResponse(BaseModel):
     routing_decision: Optional[str] = None
     top_features: Optional[dict] = None
     affected_services: Optional[list] = None
+    data_mode: Optional[str] = "demo"
 
     detected_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None

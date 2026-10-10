@@ -12,9 +12,10 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
 
 from app.api.auth import get_current_user_or_system
 from app.core.database import get_db
@@ -42,6 +43,8 @@ router = APIRouter(
     summary="Get computed reliability metrics (MTTR, MTTD, Health %)",
 )
 async def get_reliability_metrics(
+    mode: Optional[str] = Query(default=None, description="Filter by operational mode ('demo' or 'connected')"),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_system),
 ):
@@ -53,8 +56,15 @@ async def get_reliability_metrics(
     - Rolling 7-day incident frequency breakdown
     - Per-service reliability score & uptime %
     """
-    # 1. Fetch incidents
-    inc_result = await db.execute(select(Incident).order_by(Incident.detected_at.desc()))
+    active_mode = mode
+    if not active_mode and request:
+        active_mode = request.headers.get("x-synapse-mode")
+
+    # 1. Fetch incidents filtered by operational mode
+    inc_query = select(Incident).order_by(Incident.detected_at.desc())
+    if active_mode:
+        inc_query = inc_query.where(Incident.data_mode == active_mode.lower())
+    inc_result = await db.execute(inc_query)
     all_incidents = inc_result.scalars().all()
 
     # 2. Fetch services
@@ -198,13 +208,16 @@ async def get_service_metrics(
     service_id: Optional[UUID] = None,
     service_name: Optional[str] = "payment-service",
     timeframe: str = Query("1h", pattern="^(15m|1h|6h|24h|7d)$"),
+    mode: Optional[str] = Query(default=None, description="Filter by operational mode ('demo' or 'connected')"),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_system),
 ):
     """
     Returns high-resolution time-series metric data for the selected service and timeframe.
     Provides CPU, Memory, Latency (p99/p95), Error Rate, QPS, and Connection Pool saturation.
-    Uses stored features from `risk_assessments` if available, blended with continuous telemetry.
+    In 'connected' mode, pulls real telemetry from the Prometheus Telemetry Bridge.
+    In 'demo' mode, operates on the calibrated static demo dataset curves.
     """
     # Resolve service name if UUID supplied
     resolved_name = service_name or "payment-service"
@@ -213,6 +226,11 @@ async def get_service_metrics(
         svc_obj = svc_res.scalar_one_or_none()
         if svc_obj:
             resolved_name = svc_obj.service_name
+
+    active_mode = mode
+    if not active_mode and request:
+        active_mode = request.headers.get("x-synapse-mode")
+    active_mode = (active_mode or "demo").lower()
 
     # Determine time window & sampling step
     now = datetime.now(timezone.utc)
@@ -231,6 +249,8 @@ async def get_service_metrics(
     inc_query = select(Incident).where(
         Incident.status.in_(["OPEN", "INVESTIGATING", "ACKNOWLEDGED", "REMEDIATING"])
     )
+    if active_mode:
+        inc_query = inc_query.where(Incident.data_mode == active_mode)
     if service_id:
         inc_query = inc_query.where(Incident.service_id == service_id)
     inc_res = await db.execute(inc_query)
@@ -245,8 +265,29 @@ async def get_service_metrics(
     base_qps = 850.0
     base_pool = 35.0
 
+    # In connected mode: query live telemetry bridge
+    if active_mode == "connected":
+        bridge_target = "notification-svc" if resolved_name in ("notification-service", "notification-svc") else resolved_name
+        for bridge_endpoint in ["http://localhost:9010", "http://telemetry-bridge:9010"]:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(f"{bridge_endpoint}/telemetry/{bridge_target}")
+                    if resp.status_code == 200:
+                        m_data = resp.json().get("metrics")
+                        if m_data:
+                            base_cpu = float(m_data.get("cpu_usage", base_cpu))
+                            base_mem = float(m_data.get("memory_usage", base_mem))
+                            base_lat99 = float(m_data.get("response_time_p99", base_lat99))
+                            base_lat95 = float(m_data.get("network_latency_ms", base_lat95))
+                            base_err = float(m_data.get("error_rate", base_err))
+                            base_qps = float(m_data.get("request_count", base_qps))
+                            base_pool = float(m_data.get("active_connections", base_pool)) * 10.0
+                            break
+            except Exception:
+                continue
+
     # If incident active, elevate anomalies towards the right of the timeline
-    has_anomaly = active_inc is not None or "payment" in resolved_name.lower() or "order" in resolved_name.lower()
+    has_anomaly = active_inc is not None
 
     data_points = []
     for i in range(num_points):

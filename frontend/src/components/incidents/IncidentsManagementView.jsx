@@ -10,7 +10,19 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { useIncidents, useServices, useIncidentHistory, useUpdateIncidentStatus } from '../../hooks/useIncidents';
+import {
+  useIncidents,
+  useServices,
+  useIncidentHistory,
+  useUpdateIncidentStatus,
+  useDeleteIncident,
+  useDeleteIncidentHistory,
+  useDeleteAllIncidents,
+  useRetentionSettings,
+  useUpdateRetentionSettings,
+} from '../../hooks/useIncidents';
+import { useAuth } from '../../context/AuthContext';
+import { useWorkspace } from '../../context/WorkspaceContext';
 import { getSeverityBadge, getStatusBadge } from '../../utils/formatters';
 import GuidancePanel from '../GuidancePanel';
 import {
@@ -28,12 +40,23 @@ import {
   User,
   ChevronRight,
   RefreshCw,
+  Trash2,
+  AlertTriangle,
+  Calendar,
+  X,
 } from 'lucide-react';
 
 export default function IncidentsManagementView({ onSelectService }) {
+  const { user, role } = useAuth();
+  const { mode } = useWorkspace();
   const { data: incidentsData, isLoading } = useIncidents();
   const { data: servicesData } = useServices();
   const updateStatusMutation = useUpdateIncidentStatus();
+  const deleteIncidentMutation = useDeleteIncident();
+  const deleteHistoryMutation = useDeleteIncidentHistory();
+  const deleteAllIncidentsMutation = useDeleteAllIncidents();
+  const { data: retentionData } = useRetentionSettings();
+  const updateRetentionMutation = useUpdateRetentionSettings();
 
   const incidents = Array.isArray(incidentsData) ? incidentsData : [];
   const services = Array.isArray(servicesData) ? servicesData : [];
@@ -43,6 +66,12 @@ export default function IncidentsManagementView({ onSelectService }) {
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('guidance'); // 'guidance' | 'audit'
+
+  // Modals for safe deletion
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
+  const [deleteAllConfirmText, setDeleteAllConfirmText] = useState('');
+  const [deleteError, setDeleteError] = useState(null);
 
   const serviceMap = useMemo(() => {
     const map = {};
@@ -150,6 +179,40 @@ export default function IncidentsManagementView({ onSelectService }) {
             <option value="MEDIUM">Medium</option>
             <option value="LOW">Low</option>
           </select>
+
+          {/* Time-based Log Retention Dropdown */}
+          <div className="flex items-center gap-1.5 dark:bg-slate-950 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-xl px-2.5 py-1.5 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+            <span className="text-[10px] font-mono dark:text-slate-400 text-slate-500 hidden sm:inline">Retention:</span>
+            <select
+              value={retentionData?.incidents_policy || 'all'}
+              onChange={(e) => updateRetentionMutation.mutate({ incidents_policy: e.target.value })}
+              disabled={updateRetentionMutation.isPending}
+              className="bg-transparent text-xs font-semibold dark:text-slate-200 text-slate-800 focus:outline-none cursor-pointer"
+              title="Time-based Log Retention: records older than this duration are automatically pruned"
+            >
+              <option value="1d">1 Day</option>
+              <option value="7d">7 Days</option>
+              <option value="30d">30 Days</option>
+              <option value="90d">90 Days</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+
+          {/* Purge All Incidents for active mode */}
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setDeleteAllConfirmText('');
+              setIsDeleteAllModalOpen(true);
+            }}
+            className="px-2.5 py-1.5 rounded-xl border dark:border-rose-500/30 border-rose-200 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            title="Purge all incidents for the active data mode"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Purge All</span>
+          </button>
         </div>
       </div>
 
@@ -258,6 +321,19 @@ export default function IncidentsManagementView({ onSelectService }) {
                         Mark Resolved
                       </button>
                     )}
+
+                    {/* Delete Individual Incident Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteError(null);
+                        setIsDeleteModalOpen(true);
+                      }}
+                      className="p-1.5 rounded-lg border dark:border-rose-500/30 border-rose-200 text-rose-500 hover:bg-rose-500/15 transition-all"
+                      title="Delete this incident and its audit history"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
 
@@ -315,9 +391,27 @@ export default function IncidentsManagementView({ onSelectService }) {
                                 <span className="font-bold text-indigo-600 dark:text-indigo-300 font-mono">
                                   {entry.action}
                                 </span>
-                                <span className="text-[10px] font-mono text-slate-400">
-                                  {new Date(entry.changed_at).toLocaleString()}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-mono text-slate-400">
+                                    {new Date(entry.changed_at).toLocaleString()}
+                                  </span>
+                                  {entry.id && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        deleteHistoryMutation.mutate({
+                                          historyId: entry.id,
+                                          incidentId: activeIncident.id,
+                                        });
+                                      }}
+                                      disabled={deleteHistoryMutation.isPending}
+                                      className="p-1 rounded text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                                      title="Delete this audit log entry"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                               <p className="dark:text-slate-300 text-slate-700 text-[11px] mb-2">
                                 {entry.new_value || 'Status transition applied'}
@@ -343,6 +437,153 @@ export default function IncidentsManagementView({ onSelectService }) {
           )}
         </div>
       </div>
+
+      {/* ========================================================
+          CONFIRMATION MODAL: DELETE INDIVIDUAL INCIDENT
+         ======================================================== */}
+      {isDeleteModalOpen && activeIncident && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md dark:bg-slate-900 bg-white rounded-2xl border dark:border-rose-500/30 border-rose-200 shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-sm">
+                <Trash2 className="w-5 h-5" />
+                <span>Delete Incident #{activeIncident.id.slice(0, 8)}</span>
+              </div>
+              <button
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs dark:text-slate-300 text-slate-700 leading-relaxed">
+              Are you sure you want to permanently delete{' '}
+              <strong className="dark:text-white text-slate-900">"{activeIncident.title}"</strong>?
+              This will remove the incident record and all associated audit trail entries from the database immediately.
+            </p>
+
+            {deleteError && (
+              <div className="p-3 rounded-lg dark:bg-rose-950/40 bg-rose-50 border border-rose-500/30 text-rose-500 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t dark:border-white/5 border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="px-3 py-1.5 rounded-lg dark:bg-slate-800 bg-slate-100 text-xs font-semibold dark:text-slate-300 text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await deleteIncidentMutation.mutateAsync(activeIncident.id);
+                    setIsDeleteModalOpen(false);
+                    setSelectedIncidentId(null);
+                  } catch (err) {
+                    setDeleteError(err.message || 'Failed to delete incident.');
+                  }
+                }}
+                disabled={deleteIncidentMutation.isPending}
+                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {deleteIncidentMutation.isPending ? 'Deleting...' : 'Delete Incident'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          CONFIRMATION MODAL: PURGE ALL INCIDENTS (BULK)
+         ======================================================== */}
+      {isDeleteAllModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md dark:bg-slate-900 bg-white rounded-2xl border dark:border-rose-500/40 border-rose-300 shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-sm">
+                <AlertTriangle className="w-5 h-5 text-rose-500" />
+                <span>Purge All Incidents ({mode.toUpperCase()} Mode)</span>
+              </div>
+              <button
+                onClick={() => setIsDeleteAllModalOpen(false)}
+                className="p-1 rounded text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl dark:bg-rose-950/30 bg-rose-50 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs space-y-1">
+              <span className="font-bold block">Danger Zone: Irreversible Action</span>
+              <p className="text-[11px] leading-relaxed">
+                This will delete ALL incidents and their entire audit history records currently registered under the{' '}
+                <strong>{mode}</strong> data mode. Real and demo records in the other mode remain untouched.
+              </p>
+            </div>
+
+            {role !== 'ADMIN' && role !== 'SRE' ? (
+              <div className="p-3 rounded-lg dark:bg-amber-950/30 bg-amber-50 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs">
+                Your role (<strong>{role || 'VIEWER'}</strong>) is not authorized to purge all incidents.
+                Only <strong>ADMIN</strong> or <strong>SRE</strong> roles can execute bulk module purges.
+              </div>
+            ) : (
+              <div>
+                <label className="text-[11px] font-semibold dark:text-slate-300 text-slate-700 block mb-1">
+                  Type <span className="font-mono text-rose-500 font-bold">DELETE ALL</span> to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={deleteAllConfirmText}
+                  onChange={(e) => setDeleteAllConfirmText(e.target.value)}
+                  placeholder="DELETE ALL"
+                  className="w-full px-3 py-2 dark:bg-slate-950 bg-slate-50 border dark:border-slate-700 border-slate-300 rounded-xl text-xs dark:text-white text-slate-900 font-mono focus:outline-none focus:border-rose-500"
+                />
+              </div>
+            )}
+
+            {deleteError && (
+              <div className="p-3 rounded-lg dark:bg-rose-950/40 bg-rose-50 border border-rose-500/30 text-rose-500 text-xs">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t dark:border-white/5 border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsDeleteAllModalOpen(false)}
+                className="px-3 py-1.5 rounded-lg dark:bg-slate-800 bg-slate-100 text-xs font-semibold dark:text-slate-300 text-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await deleteAllIncidentsMutation.mutateAsync(mode);
+                    setIsDeleteAllModalOpen(false);
+                    setSelectedIncidentId(null);
+                  } catch (err) {
+                    setDeleteError(err.message || 'Failed to purge incidents.');
+                  }
+                }}
+                disabled={
+                  deleteAllConfirmText !== 'DELETE ALL' ||
+                  deleteAllIncidentsMutation.isPending ||
+                  (role !== 'ADMIN' && role !== 'SRE')
+                }
+                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleteAllIncidentsMutation.isPending ? 'Purging...' : 'Confirm Purge All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

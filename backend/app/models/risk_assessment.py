@@ -48,6 +48,7 @@ class RiskAssessment(Base):
     affected_services = Column(ARRAY(TEXT), nullable=True)
     features_used = Column(JSONB, nullable=True)
     model_version = Column(String(50), nullable=True)
+    data_mode = Column(String(20), nullable=False, default="demo", index=True)
 
     assessed_at = Column(
         DateTime(timezone=True),

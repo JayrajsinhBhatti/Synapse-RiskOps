@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.service import Service, ServiceDependency
 from app.models.incident import Incident, IncidentHistory
 from app.models.risk_assessment import RiskAssessment
+from app.models.retention import RetentionPolicy, WorkspaceSetting
 
 __all__ = [
     "Base",
@@ -20,4 +21,6 @@ __all__ = [
     "Incident",
     "IncidentHistory",
     "RiskAssessment",
+    "RetentionPolicy",
+    "WorkspaceSetting",
 ]

@@ -11,6 +11,8 @@ Core business logic service responsible for:
 - Microservice orchestration with ml-engine (8000) & genai-agent (8001)
 """
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,12 +25,43 @@ from app.api.risk_assessments import router as risk_assessments_router
 from app.api.pipeline import router as pipeline_router
 from app.api.analytics import router as analytics_router
 from app.api.chaos import router as chaos_router
+from app.api.system import router as system_router
+from app.api.retention import router as retention_router
+from app.api.ingest import router as ingest_router
+
+logger = logging.getLogger("synapse.main")
+
+
+async def _periodic_retention_worker():
+    """Background task to periodically evaluate time-based retention cutoff."""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Hourly check
+            from app.core.database import AsyncSessionLocal
+            from app.api.retention import _get_or_init_policies, execute_timestamp_purge
+            async with AsyncSessionLocal() as db:
+                policies = await _get_or_init_policies(db)
+                for p in policies:
+                    if p.auto_purge_enabled and p.retention_period != "all":
+                        await execute_timestamp_purge(p.module, p.retention_period, db)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"Periodic retention worker notice: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup and shutdown."""
-    yield
+    """Application lifespan manager for startup, background retention loop, and shutdown."""
+    retention_task = asyncio.create_task(_periodic_retention_worker())
+    try:
+        yield
+    finally:
+        retention_task.cancel()
+        try:
+            await retention_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -52,6 +85,9 @@ app.include_router(risk_assessments_router)
 app.include_router(pipeline_router)
 app.include_router(analytics_router)
 app.include_router(chaos_router)
+app.include_router(system_router)
+app.include_router(retention_router)
+app.include_router(ingest_router)
 
 # =====================================================
 # CORS Middleware

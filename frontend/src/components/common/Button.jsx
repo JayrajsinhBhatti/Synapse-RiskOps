@@ -34,6 +34,8 @@ export function Button({
       'bg-gradient-to-r from-indigo-500 via-indigo-600 to-indigo-700 hover:from-indigo-400 hover:to-indigo-600 text-white shadow-md shadow-indigo-500/20 hover:shadow-indigo-500/35 border border-indigo-400/30',
     cyan:
       'bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white shadow-md shadow-cyan-500/20 border border-cyan-400/30',
+    amber:
+      'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-white shadow-md shadow-amber-500/20 border border-amber-400/30',
     secondary:
       'dark:bg-slate-900/80 bg-slate-100 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border dark:border-slate-700/70 border-slate-300 shadow-sm',
     outline:

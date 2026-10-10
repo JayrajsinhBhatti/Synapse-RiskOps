@@ -47,3 +47,29 @@ class ServiceTopologyResponse(BaseModel):
     dependencies: List[ServiceDependencyResponse]
     total_services: int
     total_dependencies: int
+
+
+class ServiceUpdateRequest(BaseModel):
+    """Payload to update service configuration, criticality, or inclusion."""
+    service_name: Optional[str] = None
+    criticality: Optional[str] = Field(None, pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
+    is_active: Optional[bool] = None
+    description: Optional[str] = None
+    owner: Optional[str] = None
+
+
+class BatchServiceConfigureItem(BaseModel):
+    """Single service configuration item for onboarding review."""
+    id: Optional[UUID] = None
+    service_id: Optional[UUID] = None
+    service_name: str
+    display_name: Optional[str] = None
+    criticality: str = Field("MEDIUM", pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
+    is_active: bool = True
+    dependencies: Optional[List[str]] = []
+
+
+class BatchServiceConfigureRequest(BaseModel):
+    """Batch configure detected services during onboarding."""
+    services: List[BatchServiceConfigureItem]
+

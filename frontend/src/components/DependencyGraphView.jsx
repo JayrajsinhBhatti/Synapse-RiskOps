@@ -19,7 +19,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
-import { useTopology } from '../hooks/useIncidents';
+import { useTopology, useIncidents } from '../hooks/useIncidents';
 import { getRiskScoreStyle, getServiceHealthBadge } from '../utils/formatters';
 import { Network, Server, Layers, AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -83,23 +83,144 @@ const nodeTypes = {
   serviceNode: ServiceNode,
 };
 
-// Fixed positions arranged logically by Tier for clean architecture rendering
-const LAYOUT_COORDINATES = {
-  'api-gateway': { x: 380, y: 30 },
-  'auth-service': { x: 140, y: 140 },
-  'order-service': { x: 380, y: 140 },
-  'payment-gateway': { x: 620, y: 140 },
-  'payment-service': { x: 620, y: 140 },
-  'inventory-service': { x: 260, y: 260 },
-  'shipping-service': { x: 500, y: 260 },
-  'notification-service': { x: 740, y: 260 },
-  'recommendation-engine': { x: 20, y: 260 },
-  'analytics-pipeline': { x: 140, y: 380 },
-  'audit-service': { x: 380, y: 380 },
-  'cache-layer': { x: 620, y: 380 },
-  'log-aggregator': { x: 620, y: 380 },
-  'monitoring-agent': { x: 380, y: 490 },
-};
+/**
+ * Computes collision-free, hierarchical layout coordinates for microservices.
+ * 
+ * Arranges services into logical architectural layers:
+ * - Level 0: Ingress & API Gateways
+ * - Level 1: Auth & Identity Services
+ * - Level 2: Core Domain Microservices
+ * - Level 3: Async & Secondary Microservices
+ * - Level 4: Databases, Caches & Message Queues
+ * 
+ * Ensures minimum 250px horizontal pitch and 145px vertical pitch,
+ * wrapping wider layers into staggered rows so NO services ever overlap.
+ */
+function getServiceArchitecturalLevel(service, inDegree, outDegree) {
+  const name = (service.name || service.service_name || service.label || '').toLowerCase();
+  const type = (service.service_type || '').toUpperCase();
+
+  // Level 0: Ingress / Edge / Gateway
+  if (type === 'GATEWAY' || name.includes('gateway') || name.includes('ingress') || name.includes('proxy') || name.includes('router')) {
+    return 0;
+  }
+
+  // Level 4: Storage, Queue, Cache & Infrastructure Tier
+  if (
+    type === 'DATABASE' ||
+    type === 'INFRASTRUCTURE' ||
+    name.includes('postgres') ||
+    name.includes('mysql') ||
+    name.includes('database') ||
+    name.includes('db-') ||
+    name.includes('cache') ||
+    name.includes('redis') ||
+    name.includes('queue') ||
+    name.includes('rabbitmq') ||
+    name.includes('kafka')
+  ) {
+    return 4;
+  }
+
+  // Level 1: Identity & Authentication
+  if (name.includes('auth') || name.includes('identity') || name.includes('token') || name.includes('login') || name.includes('user')) {
+    return 1;
+  }
+
+  // Level 3: Async / Notifications / Search / Analytics
+  if (
+    name.includes('notification') ||
+    name.includes('alert') ||
+    name.includes('email') ||
+    name.includes('search') ||
+    name.includes('shipping') ||
+    name.includes('audit') ||
+    name.includes('analytics') ||
+    name.includes('log') ||
+    name.includes('monitor')
+  ) {
+    return 3;
+  }
+
+  // Level 2: Core Business Domain Microservices (orders, payments, inventory, etc.)
+  return 2;
+}
+
+function computeDynamicTopologyCoordinates(services, dependencies) {
+  if (!services || services.length === 0) return {};
+
+  const inDegreeMap = {};
+  const outDegreeMap = {};
+
+  services.forEach((s) => {
+    inDegreeMap[s.cleanId] = 0;
+    outDegreeMap[s.cleanId] = 0;
+  });
+
+  dependencies.forEach((d) => {
+    const src = d.source_service_id || d.source;
+    const tgt = d.target_service_id || d.target;
+    if (inDegreeMap[tgt] !== undefined) inDegreeMap[tgt] += 1;
+    if (outDegreeMap[src] !== undefined) outDegreeMap[src] += 1;
+  });
+
+  const levelGroups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
+  services.forEach((s) => {
+    const lvl = getServiceArchitecturalLevel(s, inDegreeMap[s.cleanId] || 0, outDegreeMap[s.cleanId] || 0);
+    levelGroups[lvl].push(s);
+  });
+
+  const coordinates = {};
+  const H_PITCH = 260; // 180px node + 80px horizontal gap
+  const V_ROW_HEIGHT = 155; // 85px node + 70px vertical gap
+  const MAX_PER_ROW = 4; // Wrap layers with more than 4 nodes into clean sub-rows
+
+  // Determine canvas center width based on maximum row width
+  let maxColsInDiagram = 1;
+  [0, 1, 2, 3, 4].forEach((lvl) => {
+    const count = levelGroups[lvl]?.length || 0;
+    if (count > 0) {
+      const cols = Math.min(count, MAX_PER_ROW);
+      if (cols > maxColsInDiagram) maxColsInDiagram = cols;
+    }
+  });
+
+  const canvasCenter = Math.max(520, (maxColsInDiagram * H_PITCH) / 2 + 60);
+  let currentY = 40;
+
+  [0, 1, 2, 3, 4].forEach((lvl) => {
+    const svcs = levelGroups[lvl];
+    if (!svcs || svcs.length === 0) return;
+
+    // Break into sub-rows of MAX_PER_ROW
+    const subRows = [];
+    for (let i = 0; i < svcs.length; i += MAX_PER_ROW) {
+      subRows.push(svcs.slice(i, i + MAX_PER_ROW));
+    }
+
+    subRows.forEach((rowSvcs) => {
+      const rowCount = rowSvcs.length;
+      const rowWidth = (rowCount - 1) * H_PITCH;
+      const startX = Math.max(60, canvasCenter - rowWidth / 2);
+
+      rowSvcs.forEach((svc, colIdx) => {
+        const x = Math.round(startX + colIdx * H_PITCH);
+        const y = Math.round(currentY);
+        coordinates[svc.cleanId] = { x, y };
+        if (svc.id !== undefined && svc.id !== null) {
+          coordinates[String(svc.id)] = { x, y };
+        }
+        coordinates[svc.name] = { x, y };
+      });
+
+      currentY += V_ROW_HEIGHT;
+    });
+
+    currentY += 25; // Clean buffer between architectural layers
+  });
+
+  return coordinates;
+}
 
 export default function DependencyGraphView({
   selectedServiceId,
@@ -107,6 +228,7 @@ export default function DependencyGraphView({
   onSelectService,
 }) {
   const { data: topologyData, isLoading, refetch } = useTopology();
+  const { data: incidentsData } = useIncidents();
   const [selectedTier, setSelectedTier] = useState('ALL');
 
   const { initialNodes, initialEdges } = useMemo(() => {
@@ -114,18 +236,43 @@ export default function DependencyGraphView({
       return { initialNodes: [], initialEdges: [] };
     }
 
+    // Active incidents across the platform
+    const rawIncidents = Array.isArray(incidentsData) ? incidentsData : [];
+    const activeIncidents = rawIncidents.filter(
+      (i) => i.status === 'OPEN' || i.status === 'INVESTIGATING' || i.status === 'ACKNOWLEDGED' || i.status === 'REMEDIATING'
+    );
+
+    // Set of active incident service identifiers
+    const incidentServiceNames = new Set();
+    const incidentServiceIds = new Set();
+    const blastRadiusNames = new Set();
+
+    if (activeIncidentServiceId) {
+      incidentServiceIds.add(String(activeIncidentServiceId));
+      incidentServiceNames.add(String(activeIncidentServiceId));
+    }
+
+    activeIncidents.forEach((inc) => {
+      if (inc.service_id) incidentServiceIds.add(String(inc.service_id));
+      if (inc.root_cause) incidentServiceNames.add(String(inc.root_cause));
+      if (Array.isArray(inc.affected_services)) {
+        inc.affected_services.forEach((aff) => blastRadiusNames.add(String(aff)));
+      }
+    });
+
     // Support both formats: backend ServiceTopologyResponse (services & dependencies) or nodes & edges
     const rawServices = topologyData.services || topologyData.nodes || [];
     const rawDependencies = topologyData.dependencies || topologyData.edges || [];
 
-    // Map criticality to Tier
-    const normalizedServices = rawServices.map((s) => {
-      const name = s.service_name || s.name || s.label || s.id;
+    // Map criticality to Tier with guaranteed cleanId
+    const normalizedServices = rawServices.map((s, idx) => {
+      const name = s.service_name || s.name || s.label || (s.id ? String(s.id) : `service-${idx + 1}`);
       const crit = (s.criticality || '').toUpperCase();
       const tier = s.tier || (crit === 'CRITICAL' ? 1 : crit === 'HIGH' ? 2 : 3);
+      const cleanId = s.id !== undefined && s.id !== null ? String(s.id) : `svc-${name}-${idx}`;
       return {
         ...s,
-        cleanId: s.id,
+        cleanId,
         name,
         tier,
       };
@@ -137,20 +284,86 @@ export default function DependencyGraphView({
       return s.tier === Number(selectedTier);
     });
 
-    const activeServiceIds = new Set(filteredServices.map((s) => s.cleanId));
-    const activeServiceNames = new Set(filteredServices.map((s) => s.name));
+    // Build canonical ID resolver map
+    const idResolver = {};
+    filteredServices.forEach((s) => {
+      idResolver[s.cleanId] = s.cleanId;
+      if (s.id !== undefined && s.id !== null) idResolver[String(s.id)] = s.cleanId;
+      if (s.name) idResolver[s.name] = s.cleanId;
+      if (s.service_name) idResolver[s.service_name] = s.cleanId;
+    });
+
+    // Compute collision-free coordinates dynamically for this set of services
+    const layoutCoordinates = computeDynamicTopologyCoordinates(filteredServices, rawDependencies);
 
     const nodes = filteredServices.map((svc, index) => {
       const coord =
-        LAYOUT_COORDINATES[svc.name] || {
-          x: (index % 4) * 220 + 80,
-          y: Math.floor(index / 4) * 140 + 40,
+        layoutCoordinates[svc.cleanId] ||
+        (svc.id !== undefined && layoutCoordinates[String(svc.id)]) ||
+        layoutCoordinates[svc.name] || {
+          x: (index % 4) * 260 + 60,
+          y: Math.floor(index / 4) * 155 + 40,
         };
 
-      const isRootCause =
-        svc.cleanId === activeIncidentServiceId || svc.name === activeIncidentServiceId;
+      const normalizeSvc = (val) =>
+        String(val || '')
+          .toLowerCase()
+          .replace(/[-_\s]+/g, '')
+          .replace('service', '')
+          .replace('svc', '');
+
+      const svcNorm = normalizeSvc(svc.name);
+
+      const matchingIncident = activeIncidents.find((inc) => {
+        if (!inc) return false;
+        if (
+          String(inc.service_id) === svc.cleanId ||
+          String(inc.service_id) === String(svc.id) ||
+          String(inc.service_id) === svc.name
+        ) {
+          return true;
+        }
+        if (inc.root_cause) {
+          if (inc.root_cause === svc.name || normalizeSvc(inc.root_cause) === svcNorm) {
+            return true;
+          }
+        }
+        if (inc.title && normalizeSvc(inc.title).includes(svcNorm)) {
+          return true;
+        }
+        return false;
+      });
+
+      const isRootCause = Boolean(
+        String(svc.cleanId) === String(activeIncidentServiceId) ||
+        svc.name === String(activeIncidentServiceId) ||
+        normalizeSvc(activeIncidentServiceId) === svcNorm ||
+        incidentServiceIds.has(svc.cleanId) ||
+        incidentServiceNames.has(svc.name) ||
+        matchingIncident
+      );
+
+      const isInBlastRadiusList =
+        blastRadiusNames.has(svc.name) ||
+        blastRadiusNames.has(svc.cleanId) ||
+        activeIncidents.some((inc) =>
+          Array.isArray(inc.affected_services) &&
+          inc.affected_services.some((aff) => normalizeSvc(aff) === svcNorm && aff !== inc.root_cause)
+        );
+
+      const isBlastRadius = !isRootCause && isInBlastRadiusList;
+
       const isHighlighted =
-        svc.cleanId === selectedServiceId || svc.name === selectedServiceId;
+        String(svc.cleanId) === String(selectedServiceId) ||
+        svc.name === String(selectedServiceId) ||
+        isRootCause ||
+        isBlastRadius;
+
+      let calculatedRisk = isRootCause ? 0.965 : isBlastRadius ? 0.68 : 0.28;
+      if (matchingIncident?.risk_score) {
+        const rawScore = Number(matchingIncident.risk_score);
+        calculatedRisk = rawScore > 1.0 ? rawScore / 100.0 : rawScore;
+      }
 
       return {
         id: svc.cleanId,
@@ -160,8 +373,8 @@ export default function DependencyGraphView({
           label: svc.name,
           tier: svc.tier,
           criticality: svc.criticality || 'HIGH',
-          health_status: isRootCause ? 'critical' : 'healthy',
-          risk_score: isRootCause ? 0.94 : 0.28,
+          health_status: isRootCause ? 'critical' : isBlastRadius ? 'degraded' : 'healthy',
+          risk_score: calculatedRisk,
           isRootCause,
           isHighlighted,
         },
@@ -170,23 +383,37 @@ export default function DependencyGraphView({
 
     const edges = rawDependencies
       .filter((d) => {
-        const src = d.source_service_id || d.source;
-        const tgt = d.target_service_id || d.target;
-        return activeServiceIds.has(src) && activeServiceIds.has(tgt);
+        const rawSrc = d.source_service_id ?? d.source;
+        const rawTgt = d.target_service_id ?? d.target;
+        const resolvedSrc = idResolver[rawSrc] || idResolver[String(rawSrc)];
+        const resolvedTgt = idResolver[rawTgt] || idResolver[String(rawTgt)];
+        return Boolean(resolvedSrc && resolvedTgt && resolvedSrc !== resolvedTgt);
       })
       .map((d, idx) => {
-        const src = d.source_service_id || d.source;
-        const tgt = d.target_service_id || d.target;
+        const rawSrc = d.source_service_id ?? d.source;
+        const rawTgt = d.target_service_id ?? d.target;
+        const src = idResolver[rawSrc] || idResolver[String(rawSrc)];
+        const tgt = idResolver[rawTgt] || idResolver[String(rawTgt)];
         const srcName = d.source_service_name || src;
         const tgtName = d.target_service_name || tgt;
 
-        const isImpacted =
-          src === activeIncidentServiceId ||
-          tgt === activeIncidentServiceId ||
-          srcName === activeIncidentServiceId ||
-          tgtName === activeIncidentServiceId ||
-          src === selectedServiceId ||
-          srcName === selectedServiceId;
+        const isIncidentEdge =
+          incidentServiceIds.has(src) ||
+          incidentServiceIds.has(tgt) ||
+          incidentServiceNames.has(srcName) ||
+          incidentServiceNames.has(tgtName) ||
+          String(activeIncidentServiceId) === src ||
+          String(activeIncidentServiceId) === tgt ||
+          String(activeIncidentServiceId) === srcName ||
+          String(activeIncidentServiceId) === tgtName;
+
+        const isSelectedEdge =
+          src === String(selectedServiceId) ||
+          tgt === String(selectedServiceId) ||
+          srcName === String(selectedServiceId) ||
+          tgtName === String(selectedServiceId);
+
+        const isImpacted = isIncidentEdge || isSelectedEdge;
 
         return {
           id: `edge-${idx}-${src}-${tgt}`,
@@ -195,13 +422,13 @@ export default function DependencyGraphView({
           type: 'smoothstep',
           animated: isImpacted,
           style: {
-            stroke: isImpacted ? '#ef4444' : '#6366f1',
+            stroke: isIncidentEdge ? '#ef4444' : isSelectedEdge ? '#f59e0b' : '#6366f1',
             strokeWidth: isImpacted ? 2.5 : 1.5,
             opacity: isImpacted ? 0.95 : 0.45,
           },
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: isImpacted ? '#ef4444' : '#6366f1',
+            color: isIncidentEdge ? '#ef4444' : isSelectedEdge ? '#f59e0b' : '#6366f1',
             width: 15,
             height: 15,
           },
@@ -209,7 +436,7 @@ export default function DependencyGraphView({
       });
 
     return { initialNodes: nodes, initialEdges: edges };
-  }, [topologyData, selectedTier, selectedServiceId, activeIncidentServiceId]);
+  }, [topologyData, incidentsData, selectedTier, selectedServiceId, activeIncidentServiceId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);

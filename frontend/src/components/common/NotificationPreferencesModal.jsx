@@ -26,12 +26,37 @@ export default function NotificationPreferencesModal({ isOpen, onClose }) {
       : {
           slack: { enabled: true, webhook: 'https://hooks.slack.com/services/T00/B00/X00', minSeverity: 'HIGH' },
           pagerduty: { enabled: true, integrationKey: 'pd-live-key-4912903', minSeverity: 'CRITICAL' },
-          email: { enabled: true, recipients: 'sre-oncall@synapse.internal', minSeverity: 'HIGH' },
+          email: { enabled: true, recipients: 'jayrajsinhbhatti9687@gmail.com', minSeverity: 'HIGH' },
           n8n: { enabled: true, webhookUrl: 'http://localhost:5678/webhook/synapse-risk', minSeverity: 'ALL' },
         };
   });
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState(null);
+
+  const handleTestEmail = async () => {
+    setTestingEmail(true);
+    setTestEmailResult(null);
+    try {
+      const token = localStorage.getItem('access_token');
+      const targetRecipient = channels.email?.recipients || 'jayrajsinhbhatti9687@gmail.com';
+      const res = await fetch('/api/system/test-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ recipient: targetRecipient }),
+      });
+      const data = await res.json();
+      setTestEmailResult(data);
+    } catch (err) {
+      setTestEmailResult({ success: false, detail: String(err) });
+    } finally {
+      setTestingEmail(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -156,6 +181,65 @@ export default function NotificationPreferencesModal({ isOpen, onClose }) {
                   <option value="CRITICAL">Critical Only</option>
                   <option value="HIGH">High & Critical</option>
                 </select>
+              </div>
+            )}
+          </div>
+
+          {/* Gmail SMTP Incident Alerting */}
+          <div className="p-3.5 rounded-xl dark:bg-slate-950/60 bg-slate-50 border dark:border-slate-800 border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-sky-400" />
+                <span className="text-xs font-bold dark:text-white text-slate-900">Gmail SMTP Admin Alert</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 font-mono">
+                  spareid9687@gmail.com
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={channels.email?.enabled ?? true}
+                onChange={() => handleToggle('email')}
+                className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
+              />
+            </div>
+            {channels.email?.enabled && (
+              <div className="space-y-2 pt-1 text-xs">
+                <div className="flex items-center justify-between gap-3">
+                  <input
+                    type="email"
+                    value={channels.email?.recipients || 'jayrajsinhbhatti9687@gmail.com'}
+                    onChange={(e) => setChannels({ ...channels, email: { ...channels.email, recipients: e.target.value } })}
+                    className="flex-1 px-2.5 py-1 text-[11px] rounded dark:bg-slate-900 bg-white border dark:border-slate-700 border-slate-300 font-mono"
+                    placeholder="jayrajsinhbhatti9687@gmail.com"
+                  />
+                  <select
+                    value={channels.email?.minSeverity || 'HIGH'}
+                    onChange={(e) => handleSeverityChange('email', e.target.value)}
+                    className="px-2 py-1 text-[11px] rounded dark:bg-slate-900 bg-white border dark:border-slate-700 border-slate-300 font-semibold"
+                  >
+                    <option value="CRITICAL">Critical Only</option>
+                    <option value="HIGH">High & Critical</option>
+                    <option value="ALL">All Alerts</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-slate-400">
+                    Sends predicted failure reports to admin via Gmail SMTP
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleTestEmail}
+                    disabled={testingEmail}
+                    className="px-2.5 py-1 rounded text-[11px] font-semibold bg-sky-600/20 text-sky-400 hover:bg-sky-600/30 border border-sky-500/30 disabled:opacity-50 transition-colors"
+                  >
+                    {testingEmail ? 'Sending...' : 'Test Gmail Alert'}
+                  </button>
+                </div>
+                {testEmailResult && (
+                  <div className={`text-[11px] p-2 rounded ${testEmailResult.success ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'}`}>
+                    {testEmailResult.success ? '✅ Test incident alert delivered to ' + (testEmailResult.recipient || 'admin') : `⚠️ ${testEmailResult.detail || testEmailResult.status}`}
+                  </div>
+                )}
               </div>
             )}
           </div>

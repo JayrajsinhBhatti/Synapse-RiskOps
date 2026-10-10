@@ -19,11 +19,11 @@ from fastapi import (
     Request,
     status,
 )
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.auth import get_current_user, get_current_user_or_system
+from app.api.auth import get_current_user, get_current_user_or_system, require_role
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.incident import Incident, IncidentHistory
@@ -39,6 +39,8 @@ from app.schemas.incident import (
     IncidentUpdate,
 )
 from app.schemas.analytics import SimilarIncidentItem
+import asyncio
+from app.services.email_service import email_service
 from app.services.sse_manager import sse_manager
 
 router = APIRouter(
@@ -109,6 +111,7 @@ async def create_incident(
         risk_score=incident_data.risk_score,
         confidence=incident_data.confidence,
         predicted_failure=incident_data.predicted_failure,
+        data_mode=getattr(incident_data, "data_mode", "demo") or "demo",
         assigned_to=incident_data.assigned_to,
         created_by=current_user.id,
     )
@@ -132,6 +135,26 @@ async def create_incident(
     # Broadcast real-time SSE event to connected dashboard clients
     await sse_manager.broadcast_incident_created(incident)
 
+    # Dispatch Gmail SMTP Incident Alert to Admin
+    try:
+        service_name_str = service.service_name if (incident_data.service_id and 'service' in locals() and service) else "Platform Service"
+        email_payload = {
+            "incident_id": str(incident.id),
+            "service_name": service_name_str,
+            "failure_type": incident.predicted_failure_type or "manual_reported_incident",
+            "severity": incident.severity,
+            "risk_score": float(incident.risk_score or 75.0),
+            "ml_confidence": float(incident.confidence or 0.88),
+            "rca_confidence": 0.85,
+            "root_cause": service_name_str,
+            "routing_decision": "human_approval",
+            "guidance": incident.description or "Incident logged. Immediate triage recommended.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        asyncio.create_task(email_service.send_incident_alert(email_payload))
+    except Exception as e:
+        pass
+
     return incident
 
 
@@ -147,13 +170,15 @@ async def list_incidents(
     status_filter: Optional[str] = Query(default=None, alias="status"),
     severity: Optional[str] = None,
     service_id: Optional[UUID] = None,
+    mode: Optional[str] = Query(default=None, description="Filter by operational mode ('demo' or 'connected')"),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_system),
 ):
     """
-    Return list of incidents with optional filtering by status, severity, and service.
+    Return list of incidents with optional filtering by status, severity, service, and operational mode.
     Ordered by detected_at descending.
     """
     query = select(Incident).order_by(Incident.detected_at.desc())
@@ -166,6 +191,13 @@ async def list_incidents(
 
     if service_id:
         query = query.where(Incident.service_id == service_id)
+
+    # Operational mode filter
+    active_mode = mode
+    if not active_mode and request:
+        active_mode = request.headers.get("x-synapse-mode")
+    if active_mode:
+        query = query.where(Incident.data_mode == active_mode.lower())
 
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
@@ -385,6 +417,52 @@ async def update_incident(
 # =====================================================
 
 @router.delete(
+    "",
+    status_code=status.HTTP_200_OK,
+    summary="Purge all incidents matching active operational mode (requires confirmation & role)",
+)
+async def delete_all_incidents(
+    confirm_all: bool = Query(False, description="Must be true to confirm bulk deletion"),
+    mode: Optional[str] = Query(None, description="'demo', 'connected', or omit to purge all"),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN", "SRE"])),
+):
+    """
+    Bulk delete all incidents from PostgreSQL.
+    Requires explicit confirmation flag (confirm_all=True) and ADMIN or SRE role.
+    Respects active operational mode ('demo' or 'connected') to prevent cross-mode deletion.
+    """
+    if not confirm_all:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bulk deletion requires confirm_all=true query parameter.",
+        )
+
+    active_mode = mode
+    if not active_mode and request:
+        active_mode = request.headers.get("x-synapse-mode")
+
+    query = delete(Incident)
+    if active_mode:
+        query = query.where(Incident.data_mode == active_mode.lower())
+
+    result = await db.execute(query)
+    deleted_count = result.rowcount or 0
+    await db.commit()
+
+    # Broadcast real-time SSE event to trigger immediate UI synchronization
+    await sse_manager.broadcast_incidents_bulk_deleted(count=deleted_count, mode=active_mode)
+
+    return {
+        "status": "success",
+        "deleted_count": deleted_count,
+        "mode": active_mode or "all",
+        "message": f"Successfully deleted {deleted_count} incident records.",
+    }
+
+
+@router.delete(
     "/{incident_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
@@ -406,9 +484,41 @@ async def delete_incident(
         )
 
     await db.delete(incident)
+    await db.commit()
 
     # Broadcast real-time SSE event
     await sse_manager.broadcast_incident_deleted(incident_id)
+
+    return None
+
+
+@router.delete(
+    "/history/{history_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an individual audit history log entry",
+)
+async def delete_incident_history_entry(
+    history_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete an individual audit trail entry by UUID."""
+    result = await db.execute(
+        select(IncidentHistory).where(IncidentHistory.id == history_id)
+    )
+    entry = result.scalar_one_or_none()
+
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audit history entry not found",
+        )
+
+    await db.delete(entry)
+    await db.commit()
+
+    # Broadcast real-time SSE event
+    await sse_manager.broadcast_incident_history_deleted(history_id)
 
     return None
 

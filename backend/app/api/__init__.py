@@ -9,6 +9,8 @@ from app.api.incidents import router as incidents_router
 from app.api.services import router as services_router
 from app.api.risk_assessments import router as risk_assessments_router
 from app.api.pipeline import router as pipeline_router
+from app.api.system import router as system_router
+from app.api.retention import router as retention_router
 
 __all__ = [
     "auth_router",
@@ -16,4 +18,6 @@ __all__ = [
     "services_router",
     "risk_assessments_router",
     "pipeline_router",
+    "system_router",
+    "retention_router",
 ]

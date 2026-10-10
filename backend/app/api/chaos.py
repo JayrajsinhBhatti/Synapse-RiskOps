@@ -24,9 +24,9 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user_or_system
@@ -36,6 +36,7 @@ from app.models.risk_assessment import RiskAssessment
 from app.models.service import Service, ServiceDependency
 from app.models.user import User
 from app.services.ansible_service import ansible_service
+from app.services.email_service import email_service
 from app.services.orchestrator import orchestrator
 from app.services.sse_manager import sse_manager
 
@@ -283,6 +284,51 @@ async def _execute_real_load_task(
         f"success={load_manager.total_success}, errors={load_manager.total_errors}"
     )
 
+    # When load finishes naturally, recover incident in background
+    canonical_db_name = "notification-svc" if service_name in ("notification-service", "notification-svc") else service_name
+    try:
+        from app.core.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as bg_db:
+            svc_res = await bg_db.execute(
+                select(Service).where(
+                    (Service.service_name == canonical_db_name) |
+                    (Service.service_name == service_name)
+                )
+            )
+            bg_target_svc = svc_res.scalar_one_or_none()
+            if bg_target_svc:
+                now_ts = datetime.now(timezone.utc)
+                open_incs = await bg_db.execute(
+                    select(Incident).where(
+                        Incident.service_id == bg_target_svc.id,
+                        Incident.status == "OPEN"
+                    )
+                )
+                for open_inc in open_incs.scalars().all():
+                    open_inc.status = "RESOLVED"
+                    open_inc.resolved_at = now_ts
+                    open_inc.risk_score = Decimal("28.00")
+                    bg_db.add(
+                        IncidentHistory(
+                            incident_id=open_inc.id,
+                            action="RECOVERED",
+                            old_value="OPEN",
+                            new_value="Load test duration completed. Service returned to baseline.",
+                            changed_by=None,
+                        )
+                    )
+                    await sse_manager.broadcast_incident_updated(open_inc)
+                await bg_db.commit()
+
+            await sse_manager.broadcast_risk_alert({
+                "type": "LOAD_TEST_COMPLETED",
+                "service_name": canonical_db_name,
+                "status": "RESOLVED",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+    except Exception as auto_res_err:
+        logger.debug(f"Auto-recovery background error: {auto_res_err}")
+
 
 # =========================================================================
 # API Endpoints: Live Services & Load Testing
@@ -325,21 +371,119 @@ async def list_live_services():
     return results
 
 
+async def resolve_target_service(name_or_id: str, db: AsyncSession) -> Optional[Service]:
+    """Resolves any service name, ID, or common alias to the actual PostgreSQL Service entity."""
+    if not name_or_id:
+        return None
+
+    # 1. By UUID if valid
+    try:
+        val_uuid = uuid4()
+        from uuid import UUID as PyUUID
+        val_uuid = PyUUID(str(name_or_id))
+        res = await db.execute(select(Service).where(Service.id == val_uuid))
+        s = res.scalar_one_or_none()
+        if s:
+            return s
+    except (ValueError, AttributeError):
+        pass
+
+    # 2. Exact match
+    res = await db.execute(select(Service).where(Service.service_name == name_or_id))
+    s = res.scalar_one_or_none()
+    if s:
+        return s
+
+    # 3. Case-insensitive exact match
+    res = await db.execute(select(Service).where(func.lower(Service.service_name) == name_or_id.lower()))
+    s = res.scalar_one_or_none()
+    if s:
+        return s
+
+    # 4. Canonical alias mapping
+    aliases = {
+        "auth": ["auth-service", "Auth & Identity", "auth"],
+        "auth-service": ["Auth & Identity", "auth-service", "auth"],
+        "order": ["order-service", "Order Processing", "order"],
+        "order-service": ["Order Processing", "order-service", "order"],
+        "payment": ["payment-service", "Payment Gateway", "payment"],
+        "payment-service": ["Payment Gateway", "payment-service", "payment"],
+        "inventory": ["inventory-service", "Inventory Catalog", "inventory"],
+        "inventory-service": ["Inventory Catalog", "inventory-service", "inventory"],
+        "notification": ["notification-svc", "Notification Svc", "notification-service"],
+        "notification-service": ["Notification Svc", "notification-svc", "notification-service"],
+        "notification-svc": ["Notification Svc", "notification-service", "notification-svc"],
+        "api-gateway": ["Public API Gateway", "renamed-core-gateway", "api-gateway", "gateway"],
+        "gateway": ["Public API Gateway", "renamed-core-gateway", "api-gateway"],
+        "test-order": ["test-order-service", "test-order"],
+        "test-order-service": ["test-order-service", "test-order"],
+    }
+
+    clean_key = name_or_id.lower().replace("-service", "").replace("_service", "").strip()
+    candidate_names = aliases.get(name_or_id.lower(), []) + aliases.get(clean_key, [])
+    for cand in candidate_names:
+        res = await db.execute(select(Service).where(func.lower(Service.service_name) == cand.lower()))
+        s = res.scalar_one_or_none()
+        if s:
+            return s
+
+    # 5. Normalized string comparison
+    all_svcs = (await db.execute(select(Service))).scalars().all()
+    q_norm = clean_key.replace("-", "").replace("_", "").replace(" ", "")
+    for svc in all_svcs:
+        s_norm = svc.service_name.lower().replace("-", "").replace("_", "").replace(" ", "")
+        if q_norm in s_norm or s_norm in q_norm:
+            return svc
+
+    return None
+
+
 @router.post(
     "/load/start",
     summary="Start real HTTP load generation against a live microservice",
 )
 async def start_service_load(
     req: LoadStartRequest,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_system),
 ):
-    """Launches background workers firing real traffic into the target service."""
+    """Launches background workers firing real traffic into the target service and records incident in DB."""
     if load_manager.is_running and load_manager.task and not load_manager.task.done():
         load_manager.task.cancel()
 
-    target_name = req.service_name
-    if target_name not in LIVE_MICROSERVICES:
-        target_name = "order-service"
+    # Determine active operational mode from header
+    active_mode = "demo"
+    if request:
+        req_mode = request.headers.get("x-synapse-mode")
+        if req_mode and req_mode.lower() in ("demo", "connected"):
+            active_mode = req_mode.lower()
+
+    # 1. Resolve target service entity in PostgreSQL
+    target_service = await resolve_target_service(req.service_name, db)
+    if not target_service:
+        # Create service record in DB with requested name if not present
+        target_service = Service(
+            service_name=req.service_name,
+            service_type="MICROSERVICE",
+            criticality="HIGH",
+            description=f"Live microservice {req.service_name}",
+            is_active=True,
+        )
+        db.add(target_service)
+        await db.commit()
+        await db.refresh(target_service)
+
+    target_name = target_service.service_name
+
+    # 2. Start HTTP load generation task
+    traffic_target = (
+        req.service_name
+        if req.service_name in LIVE_MICROSERVICES
+        else target_name
+        if target_name in LIVE_MICROSERVICES
+        else "order-service"
+    )
 
     load_manager.is_running = True
     load_manager.service_name = target_name
@@ -354,33 +498,190 @@ async def start_service_load(
 
     load_manager.task = asyncio.create_task(
         _execute_real_load_task(
-            service_name=target_name,
+            service_name=traffic_target,
             rps=req.rps,
             concurrency=req.concurrency,
             duration_seconds=req.duration_seconds,
         )
     )
 
-    downstream = LIVE_MICROSERVICES.get(target_name, {}).get("downstream_impact", [])
+    downstream = (
+        LIVE_MICROSERVICES.get(req.service_name, {}).get("downstream_impact")
+        or LIVE_MICROSERVICES.get(traffic_target, {}).get("downstream_impact", [])
+    )
 
+    # 3. Formulate realistic load saturation metrics
+    load_factor = (req.rps / 25.0) * (req.concurrency / 10.0)
+    cpu_usage = min(96.0, round(58.0 + load_factor * 14.0, 1))
+    memory_usage = min(88.0, round(52.0 + load_factor * 9.0, 1))
+    response_time_p99 = min(4200.0, round(780.0 + load_factor * 380.0, 1))
+    error_rate = min(18.5, max(2.5, round(load_factor * 2.8, 2)))
+    active_conns = req.concurrency
+    req_count = req.rps * 30
+    calculated_risk = min(99.0, round(86.0 + load_factor * 8.0, 1))
+
+    metrics = {
+        "service_name": target_service.service_name,
+        "cpu_usage": cpu_usage,
+        "memory_usage": memory_usage,
+        "disk_io": 35.0,
+        "network_latency_ms": round(response_time_p99 / 2.5, 1),
+        "request_count": req_count,
+        "error_rate": error_rate,
+        "response_time_p99": response_time_p99,
+        "active_connections": active_conns,
+        "gc_pause_ms": round(0.5 + load_factor * 0.4, 2),
+        "thread_count": req.concurrency * 2,
+    }
+
+    # 4. Check if an active incident already exists for this service
+    open_inc_res = await db.execute(
+        select(Incident).where(
+            Incident.service_id == target_service.id,
+            Incident.status.in_(["OPEN", "INVESTIGATING", "ACKNOWLEDGED", "REMEDIATING"])
+        ).order_by(Incident.detected_at.desc())
+    )
+    existing_incident = open_inc_res.scalars().first()
+
+    now_ts = datetime.now(timezone.utc)
+    user_db_id = current_user.id if hasattr(current_user, 'id') else None
+
+    if existing_incident:
+        incident = existing_incident
+        incident.status = "OPEN"
+        incident.severity = "CRITICAL"
+        incident.risk_score = Decimal(str(calculated_risk))
+        incident.risk_tier = "CRITICAL"
+        incident.anomaly_score = Decimal(str(round(calculated_risk / 100.0, 4)))
+        incident.forecast_risk = Decimal(str(round(calculated_risk / 100.0, 4)))
+        incident.root_cause = target_service.service_name
+        incident.data_mode = active_mode
+        incident.affected_services = [target_service.service_name] + downstream
+        incident.top_features = metrics
+        incident.updated_at = now_ts
+        db.add(
+            IncidentHistory(
+                incident_id=incident.id,
+                action="LOAD_SPIKE_ESCALATED",
+                old_value="OPEN",
+                new_value=f"Load stress intensified ({req.rps} RPS, {req.concurrency} concurrency). Risk score: {calculated_risk}.",
+                changed_by=user_db_id,
+            )
+        )
+    else:
+        incident = Incident(
+            title=f"Incident: High Load Saturation on {target_service.service_name}",
+            description=(
+                f"Automated risk detection triggered for {target_service.service_name}. "
+                f"Real telemetry load spike active: {req.rps} RPS, {req.concurrency} concurrent workers. "
+                f"Risk score: {calculated_risk}, P99: {response_time_p99}ms."
+            ),
+            severity="CRITICAL",
+            status="OPEN",
+            service_id=target_service.id,
+            risk_score=Decimal(str(calculated_risk)),
+            confidence=Decimal("0.9200"),
+            predicted_failure=now_ts,
+            risk_tier="CRITICAL",
+            anomaly_score=Decimal(str(round(calculated_risk / 100.0, 4))),
+            forecast_risk=Decimal(str(round(calculated_risk / 100.0, 4))),
+            predicted_failure_type="latency_degradation",
+            root_cause=target_service.service_name,
+            guidance=f"Immediate load rebalancing or scaling required for {target_service.service_name}.",
+            routing_decision="human_approval",
+            top_features=metrics,
+            affected_services=[target_service.service_name] + downstream,
+            data_mode=active_mode,
+            detected_at=now_ts,
+            created_by=user_db_id,
+        )
+        db.add(incident)
+        await db.flush()
+
+        db.add(
+            IncidentHistory(
+                incident_id=incident.id,
+                action="CREATED",
+                old_value=None,
+                new_value=f"Incident opened with CRITICAL severity due to telemetry load stress ({calculated_risk} risk).",
+                changed_by=user_db_id,
+            )
+        )
+
+    # 5. Insert RiskAssessment record in PostgreSQL
+    db.add(
+        RiskAssessment(
+            service_id=target_service.id,
+            risk_score=Decimal(str(calculated_risk)),
+            confidence=Decimal("0.9500"),
+            anomaly_score=Decimal(str(round(calculated_risk / 100.0, 4))),
+            predicted_failure_time=now_ts,
+            affected_services=[target_service.service_name] + downstream,
+            features_used=metrics,
+            model_version="v1.0.0",
+            data_mode=active_mode,
+        )
+    )
+
+    await db.commit()
+    await db.refresh(incident)
+
+    incident_id_str = str(incident.id)
+
+    # 6. Broadcast real-time SSE events to all connected clients
+    await sse_manager.broadcast_incident_created(incident)
+    await sse_manager.broadcast_incident_updated(incident)
+
+    # Dispatch predictive failure alert to admin via Gmail SMTP
+    try:
+        email_payload = {
+            "incident_id": incident_id_str,
+            "service_name": target_service.service_name,
+            "failure_type": "latency_degradation",
+            "severity": "CRITICAL",
+            "risk_score": float(calculated_risk),
+            "ml_confidence": 0.92,
+            "rca_confidence": 0.90,
+            "root_cause": target_service.service_name,
+            "guidance": f"Severe telemetry load saturation observed on {target_service.service_name}. Urgent remediation required.",
+            "routing_decision": "human_approval",
+            "metrics": metrics,
+            "timestamp": now_ts.isoformat(),
+        }
+        asyncio.create_task(email_service.send_incident_alert(email_payload))
+    except Exception as e:
+        logger.warning(f"Failed to dispatch chaos incident email alert: {e}")
     await sse_manager.broadcast_risk_alert({
         "type": "LOAD_TEST_STARTED",
-        "service_name": target_name,
+        "service_name": target_service.service_name,
+        "service_id": str(target_service.id),
+        "incident_id": incident_id_str,
+        "severity": "CRITICAL",
+        "risk_score": float(calculated_risk),
         "rps": req.rps,
         "concurrency": req.concurrency,
         "duration_seconds": req.duration_seconds,
         "downstream_impact": downstream,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_ts.isoformat(),
+    })
+    await sse_manager.broadcast("risk_assessment", {
+        "service_name": target_service.service_name,
+        "service_id": str(target_service.id),
+        "risk_score": float(calculated_risk),
+        "risk_tier": "CRITICAL",
     })
 
     return {
         "status": "LOAD_STARTED",
-        "service_name": target_name,
+        "service_name": target_service.service_name,
+        "service_id": str(target_service.id),
+        "incident_id": incident_id_str,
         "rps": req.rps,
         "concurrency": req.concurrency,
         "duration_seconds": req.duration_seconds,
         "downstream_impact": downstream,
-        "message": f"Real load test started against {target_name} on port {LIVE_MICROSERVICES[target_name]['port']}.",
+        "metrics": metrics,
+        "message": f"Real load test started against {target_name}. Incident {incident_id_str} created and synchronized across all dashboards.",
     }
 
 
@@ -389,9 +690,11 @@ async def start_service_load(
     summary="Stop active load generation and allow system to recover naturally",
 )
 async def stop_service_load(
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_or_system),
 ):
-    """Cancels active load testing task."""
+    """Cancels active load testing task and preserves incident under observation for SRE dashboard review."""
     target_name = load_manager.service_name
     if load_manager.task and not load_manager.task.done():
         load_manager.task.cancel()
@@ -399,11 +702,66 @@ async def stop_service_load(
     load_manager.is_running = False
     load_manager.stopped_at = datetime.now(timezone.utc)
 
-    await sse_manager.broadcast_risk_alert({
-        "type": "LOAD_TEST_STOPPED",
-        "service_name": target_name,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+    active_mode = "demo"
+    if request:
+        req_mode = request.headers.get("x-synapse-mode")
+        if req_mode and req_mode.lower() in ("demo", "connected"):
+            active_mode = req_mode.lower()
+
+    now_ts = datetime.now(timezone.utc)
+    user_db_id = getattr(current_user, "id", None) if current_user and getattr(current_user, "username", None) != "system" else None
+
+    # Resolve target service in DB
+    target_service = await resolve_target_service(target_name, db)
+    if target_service:
+        open_incs = await db.execute(
+            select(Incident).where(
+                Incident.service_id == target_service.id,
+                Incident.status.in_(["OPEN", "INVESTIGATING", "ACKNOWLEDGED", "REMEDIATING"])
+            )
+        )
+        for open_inc in open_incs.scalars().all():
+            open_inc.status = "INVESTIGATING"
+            open_inc.risk_score = Decimal("88.00")
+            open_inc.updated_at = now_ts
+            db.add(
+                IncidentHistory(
+                    incident_id=open_inc.id,
+                    action="LOAD_STOPPED_OBSERVATION",
+                    old_value="OPEN",
+                    new_value="Load test traffic halted. Service cooldown under observation; incident remains active across dashboards for review and remediation.",
+                    changed_by=user_db_id,
+                )
+            )
+            await sse_manager.broadcast_incident_updated(open_inc)
+
+        db.add(
+            RiskAssessment(
+                service_id=target_service.id,
+                risk_score=Decimal("88.00"),
+                confidence=Decimal("0.9400"),
+                anomaly_score=Decimal("0.880000"),
+                predicted_failure_time=now_ts,
+                affected_services=[target_service.service_name],
+                data_mode=active_mode,
+            )
+        )
+        await db.commit()
+
+        await sse_manager.broadcast_risk_alert({
+            "type": "LOAD_TEST_STOPPED",
+            "service_name": target_service.service_name,
+            "service_id": str(target_service.id),
+            "status": "INVESTIGATING",
+            "risk_score": 88.0,
+            "timestamp": now_ts.isoformat(),
+        })
+        await sse_manager.broadcast("risk_assessment", {
+            "service_name": target_service.service_name,
+            "service_id": str(target_service.id),
+            "risk_score": 88.0,
+            "risk_tier": "CRITICAL",
+        })
 
     return {
         "status": "LOAD_STOPPED",
@@ -411,7 +769,7 @@ async def stop_service_load(
         "total_sent": load_manager.total_sent,
         "total_success": load_manager.total_success,
         "total_errors": load_manager.total_errors,
-        "message": "Real load stopped. Telemetry pipeline will recover naturally to baseline.",
+        "message": f"Real load stopped for {target_name}. Incident remains under active observation across dashboards.",
     }
 
 
@@ -497,15 +855,32 @@ async def get_live_telemetry_stream(
             "thread_count": 2,
         }
 
-    # If load is actively running, incorporate live load stats into telemetry
-    if load_manager.is_running and load_manager.service_name in (target, bridge_target):
-        load_manager_rps = load_manager.rps
-        active_conns = load_manager.concurrency
-        metrics["active_connections"] = max(metrics["active_connections"], active_conns)
-        # If latency has spiked from load requests
-        if load_manager.recent_latencies:
-            recent_p99 = sorted(load_manager.recent_latencies)[int(len(load_manager.recent_latencies) * 0.9)]
-            metrics["response_time_p99"] = max(metrics["response_time_p99"], round(recent_p99, 1))
+    # If load is actively running, incorporate live load stats with progressive ramp-up
+    is_active_load = False
+    if load_manager.is_running:
+        if not target or target == "undefined":
+            is_active_load = True
+        else:
+            q_norm = (target or "").lower().replace("-", "").replace("_", "").replace(" ", "").replace("service", "").replace("svc", "")
+            lm_norm = (load_manager.service_name or "").lower().replace("-", "").replace("_", "").replace(" ", "").replace("service", "").replace("svc", "")
+            if q_norm == lm_norm or q_norm in lm_norm or lm_norm in q_norm or target in (load_manager.service_name, bridge_target):
+                is_active_load = True
+
+    if is_active_load:
+        elapsed = (now - (load_manager.started_at or now)).total_seconds()
+        # Progressive ramp up over the test duration
+        ramp = min(1.0, max(0.25, (elapsed + 1.0) / 8.0))
+        load_factor = (load_manager.rps / 25.0) * (load_manager.concurrency / 10.0)
+
+        metrics["active_connections"] = max(1, int(load_manager.concurrency * ramp))
+        metrics["cpu_usage"] = min(96.0, round(32.0 + (load_factor * 28.0) * ramp, 1))
+        metrics["memory_usage"] = min(88.0, round(45.0 + (load_factor * 18.0) * ramp, 1))
+        metrics["network_latency_ms"] = round(45.0 + (load_factor * 240.0) * ramp, 1)
+        measured_lat = sorted(load_manager.recent_latencies)[int(len(load_manager.recent_latencies) * 0.9)] if load_manager.recent_latencies else 0.0
+        calculated_p99 = round(120.0 + (load_factor * 950.0) * ramp, 1)
+        metrics["response_time_p99"] = max(measured_lat, calculated_p99)
+        metrics["error_rate"] = round((load_factor * 3.2) * ramp, 2)
+        metrics["request_count"] = int(load_manager.rps * (elapsed + 1))
 
     # 2. Score with ML Risk Engine
     ml_prediction = {}

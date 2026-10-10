@@ -23,6 +23,7 @@ class RiskAssessmentCreate(BaseModel):
     affected_services: Optional[List[str]] = None
     features_used: Optional[Dict[str, Any]] = None
     model_version: Optional[str] = "v1.0.0"
+    data_mode: Optional[str] = "demo"
 
 
 class RiskAssessmentResponse(BaseModel):
@@ -40,4 +41,5 @@ class RiskAssessmentResponse(BaseModel):
     affected_services: Optional[List[str]] = None
     features_used: Optional[Dict[str, Any]] = None
     model_version: Optional[str] = None
+    data_mode: Optional[str] = "demo"
     assessed_at: Optional[datetime] = None

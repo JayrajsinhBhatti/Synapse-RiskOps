@@ -7,7 +7,7 @@
  * and provides composite system health index.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -18,21 +18,32 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import { useLatestRisk, useServices } from '../hooks/useIncidents';
+import { useLatestRisk, useServices, useIncidents } from '../hooks/useIncidents';
 import { getRiskScoreStyle } from '../utils/formatters';
 import { ShieldCheck, AlertTriangle, Flame, Activity, RefreshCw } from 'lucide-react';
 
 export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
   const { data: riskData, isLoading: riskLoading, refetch: refetchRisk } = useLatestRisk();
   const { data: servicesData, isLoading: servicesLoading } = useServices();
+  const { data: incidentsData } = useIncidents();
+
+  const [filterCategory, setFilterCategory] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const services = useMemo(() => {
     return Array.isArray(servicesData) ? servicesData : [];
   }, [servicesData]);
 
-  // Combine services with their latest risk score
+  // Combine services with their latest risk score & active incidents
   const chartData = useMemo(() => {
     const riskMap = {};
+
+    const normalizeSvc = (val) =>
+      String(val || '')
+        .toLowerCase()
+        .replace(/[-_\s]+/g, '')
+        .replace('service', '')
+        .replace('svc', '');
 
     const rawList = Array.isArray(riskData)
       ? riskData
@@ -46,21 +57,57 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
         scoreVal = scoreVal / 100.0;
       }
       if (r.service_id) {
-        riskMap[r.service_id] = scoreVal;
+        riskMap[String(r.service_id)] = scoreVal;
       }
       if (r.service_name) {
         riskMap[r.service_name] = scoreVal;
+        riskMap[normalizeSvc(r.service_name)] = scoreVal;
       }
       if (Array.isArray(r.affected_services)) {
         r.affected_services.forEach((aff) => {
           riskMap[aff] = scoreVal;
+          riskMap[normalizeSvc(aff)] = scoreVal;
+        });
+      }
+    });
+
+    // Directly integrate active incident risk across all platform views
+    const rawIncidents = Array.isArray(incidentsData) ? incidentsData : [];
+    const activeIncidents = rawIncidents.filter(
+      (i) => i.status === 'OPEN' || i.status === 'INVESTIGATING' || i.status === 'ACKNOWLEDGED' || i.status === 'REMEDIATING'
+    );
+
+    activeIncidents.forEach((inc) => {
+      let scoreVal = inc.risk_score !== undefined ? Number(inc.risk_score) : 96.5;
+      if (scoreVal > 1.0) scoreVal = scoreVal / 100.0;
+      if (inc.service_id) {
+        riskMap[String(inc.service_id)] = Math.max(scoreVal, riskMap[String(inc.service_id)] || 0);
+      }
+      if (inc.root_cause) {
+        riskMap[inc.root_cause] = Math.max(scoreVal, riskMap[inc.root_cause] || 0);
+        riskMap[normalizeSvc(inc.root_cause)] = Math.max(scoreVal, riskMap[normalizeSvc(inc.root_cause)] || 0);
+      }
+      if (Array.isArray(inc.affected_services)) {
+        inc.affected_services.forEach((aff) => {
+          const affScore = Math.max(0.68, scoreVal * 0.75);
+          const affNorm = normalizeSvc(aff);
+          if (riskMap[aff] === undefined || riskMap[aff] < 0.60) riskMap[aff] = affScore;
+          if (riskMap[affNorm] === undefined || riskMap[affNorm] < 0.60) riskMap[affNorm] = affScore;
         });
       }
     });
 
     return services.map((s) => {
       const name = s.service_name || s.name || s.id;
-      let score = riskMap[s.id] !== undefined ? riskMap[s.id] : riskMap[name];
+      const norm = normalizeSvc(name);
+
+      let score =
+        riskMap[String(s.id)] !== undefined
+          ? riskMap[String(s.id)]
+          : riskMap[name] !== undefined
+          ? riskMap[name]
+          : riskMap[norm];
+
       if (score === undefined) {
         // Deterministic baseline risk based on criticality
         score = s.criticality === 'CRITICAL' ? 0.38 : s.criticality === 'HIGH' ? 0.22 : 0.12;
@@ -80,7 +127,20 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
         category: style.tier,
       };
     }).sort((a, b) => b.score - a.score);
-  }, [services, riskData]);
+  }, [services, riskData, incidentsData]);
+
+  // Filtered services for the breakdown list
+  const filteredChartData = useMemo(() => {
+    return chartData.filter((item) => {
+      const matchesCategory =
+        filterCategory === 'ALL' ||
+        item.category.toUpperCase() === filterCategory.toUpperCase();
+      const matchesSearch =
+        !searchQuery.trim() ||
+        item.fullName.toLowerCase().includes(searchQuery.toLowerCase().trim());
+      return matchesCategory && matchesSearch;
+    });
+  }, [chartData, filterCategory, searchQuery]);
 
   // Summary Metrics
   const stats = useMemo(() => {
@@ -94,7 +154,7 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
   }, [chartData]);
 
   return (
-    <div className="glass-card p-5 flex flex-col h-full">
+    <div className="glass-card p-5 flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -143,7 +203,7 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
       </div>
 
       {/* Chart Section */}
-      <div className="flex-1 min-h-[220px] w-full dark:bg-slate-900/60 bg-slate-50/60 rounded-xl p-2 border dark:border-slate-800/80 border-slate-200 mb-4 shadow-sm">
+      <div className="h-[250px] w-full dark:bg-slate-900/60 bg-slate-50/60 rounded-xl p-2 border dark:border-slate-800/80 border-slate-200 mb-4 shadow-sm">
         {chartData.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-500 text-xs">
             Loading service risk metrics...
@@ -218,35 +278,110 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
         )}
       </div>
 
-      {/* Mini Service List */}
-      <div className="space-y-1.5 overflow-y-auto max-h-48 pr-1">
-        {chartData.slice(0, 5).map((s) => {
-          const isSelected = selectedServiceId === s.id;
-          return (
-            <div
-              key={s.id}
-              onClick={() => onSelectService && onSelectService(s.id)}
-              className={`p-2 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition-all ${
-                isSelected
-                  ? 'bg-synapse-500/20 border-synapse-500/60 text-white'
-                  : 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800 text-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
-                <span className="font-medium text-slate-200">{s.fullName}</span>
-                <span className="text-[10px] text-slate-400 px-1.5 py-0.2 rounded bg-slate-700/50">
-                  T{s.tier}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 font-mono">
-                <span className="text-xs font-bold" style={{ color: s.color }}>
-                  {s.score}
-                </span>
-              </div>
+      {/* Services Risk List Section */}
+      <div className="mt-2 pt-4 border-t dark:border-slate-800/80 border-slate-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider dark:text-slate-300 text-slate-700">
+              Microservices Risk Breakdown
+            </h3>
+            <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full dark:bg-slate-800 bg-slate-200 dark:text-slate-300 text-slate-700">
+              {filteredChartData.length} of {chartData.length} services
+            </span>
+          </div>
+
+          {/* Filter and Search controls */}
+          <div className="flex items-center gap-2">
+            <div className="flex dark:bg-slate-800/80 bg-slate-100 p-0.5 rounded-lg border dark:border-slate-700/60 border-slate-200 text-[11px]">
+              {['ALL', 'CRITICAL', 'WATCH', 'HEALTHY'].map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setFilterCategory(category)}
+                  className={`px-2 py-0.5 rounded-md font-semibold transition-all ${
+                    filterCategory === category
+                      ? 'bg-synapse-600 text-white shadow-sm'
+                      : 'dark:text-slate-400 text-slate-600 dark:hover:text-white hover:text-slate-900'
+                  }`}
+                >
+                  {category === 'ALL' ? 'All' : category.charAt(0) + category.slice(1).toLowerCase()}
+                </button>
+              ))}
             </div>
-          );
-        })}
+            <input
+              type="text"
+              placeholder="Filter service..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="text-xs px-2.5 py-1 rounded-lg dark:bg-slate-900/80 bg-white border dark:border-slate-700 border-slate-300 dark:text-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-synapse-500 w-36"
+            />
+          </div>
+        </div>
+
+        {/* Expanded Services Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 max-h-[340px] overflow-y-auto pr-1 pb-1">
+          {filteredChartData.length === 0 ? (
+            <div className="col-span-full py-6 text-center text-xs dark:text-slate-500 text-slate-400">
+              No microservices match current filter.
+            </div>
+          ) : (
+            filteredChartData.map((s) => {
+              const isSelected = selectedServiceId === s.id || selectedServiceId === s.fullName;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => onSelectService && onSelectService(s.id)}
+                  className={`p-2.5 rounded-xl border text-xs flex flex-col justify-between cursor-pointer transition-all duration-200 group shadow-sm ${
+                    isSelected
+                      ? 'dark:bg-synapse-900/30 bg-synapse-50 border-synapse-500 ring-1 ring-synapse-500/50 dark:text-white text-slate-950'
+                      : 'dark:bg-slate-800/40 bg-white dark:border-slate-800 border-slate-200 hover:border-slate-300 dark:hover:border-slate-700 dark:hover:bg-slate-800/70 hover:bg-slate-50 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-1.5 mb-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                        style={{ backgroundColor: s.color }}
+                      />
+                      <span className="font-semibold truncate dark:text-slate-100 text-slate-900 text-xs">
+                        {s.fullName}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded dark:bg-slate-800 bg-slate-100 text-slate-500 dark:text-slate-400 shrink-0">
+                      T{s.tier}
+                    </span>
+                  </div>
+
+                  {/* Progress bar and Risk Score */}
+                  <div className="space-y-1 mt-auto">
+                    <div className="w-full bg-slate-200 dark:bg-slate-700/60 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(8, s.score * 100))}%`,
+                          backgroundColor: s.color,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] pt-0.5">
+                      <span
+                        className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded"
+                        style={{
+                          color: s.color,
+                          backgroundColor: `${s.color}15`,
+                        }}
+                      >
+                        {s.category}
+                      </span>
+                      <span className="font-mono font-bold text-xs" style={{ color: s.color }}>
+                        {s.score.toFixed(3)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );

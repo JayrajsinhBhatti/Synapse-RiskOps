@@ -1,0 +1,4 @@
+connect to live system
+logs in time limit
+forced log clearance option
+what time a company has to train model so that model starts predicting

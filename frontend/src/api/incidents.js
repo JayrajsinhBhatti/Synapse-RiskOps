@@ -49,6 +49,29 @@ export async function triggerAlert(alertData) {
   return apiClient.post('/incidents/alert', alertData);
 }
 
+/**
+ * Delete a specific incident by ID.
+ */
+export async function deleteIncident(incidentId) {
+  return apiClient.delete(`/incidents/${incidentId}`);
+}
+
+/**
+ * Delete a specific audit history entry by ID.
+ */
+export async function deleteIncidentHistory(historyId) {
+  return apiClient.delete(`/incidents/history/${historyId}`);
+}
+
+/**
+ * Delete all incidents for the active data mode (requires confirm_all=true).
+ */
+export async function deleteAllIncidents(mode) {
+  const params = { confirm_all: true };
+  if (mode) params.mode = mode;
+  return apiClient.delete('/incidents', { params });
+}
+
 // =====================================================
 // Services & Topology Operations
 // =====================================================
@@ -83,6 +106,22 @@ export async function getLatestRiskAssessments() {
  */
 export async function getRiskAssessments(params = {}) {
   return apiClient.get('/risk-assessments', { params });
+}
+
+/**
+ * Delete an individual risk assessment record by ID.
+ */
+export async function deleteRiskAssessment(assessmentId) {
+  return apiClient.delete(`/risk-assessments/${assessmentId}`);
+}
+
+/**
+ * Delete all risk assessments for the active data mode (requires confirm_all=true).
+ */
+export async function deleteAllRiskAssessments(mode) {
+  const params = { confirm_all: true };
+  if (mode) params.mode = mode;
+  return apiClient.delete('/risk-assessments', { params });
 }
 
 // =====================================================

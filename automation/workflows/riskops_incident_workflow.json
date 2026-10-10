@@ -206,6 +206,24 @@
       ],
       "id": "a1b2c3d4-0010-4000-8000-000000000010",
       "name": "Log Non-Critical"
+    },
+    {
+      "parameters": {
+        "fromEmail": "spareid9687@gmail.com",
+        "toEmail": "jayrajsinhbhatti9687@gmail.com",
+        "subject": "=🚨 [{{ $json.severity }}] Synapse Incident Alert: {{ $json.service }} failure predicted",
+        "html": "=<h2>Synapse RiskOps - Critical Predictive Incident Alert</h2><p><b>Service:</b> {{ $json.service }}</p><p><b>Severity:</b> {{ $json.severity }}</p><p><b>Risk Score:</b> {{ $json.risk_score }}%</p><p><b>Root Cause:</b> {{ $json.root_cause }}</p><p><b>Routing Decision:</b> {{ $json.routing_decision }}</p><p><a href=\"http://localhost:5173/dashboard?incident_id={{ $json.incident_id }}\">View Incident in RiskOps Dashboard</a></p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1080,
+        -40
+      ],
+      "id": "a1b2c3d4-0011-4000-8000-000000000011",
+      "name": "Send Gmail to Admin",
+      "continueOnFail": true
     }
   ],
   "connections": {
@@ -290,6 +308,17 @@
         [
           {
             "node": "Log Notification & Approval State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Notification & Approval State": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail to Admin",
             "type": "main",
             "index": 0
           }

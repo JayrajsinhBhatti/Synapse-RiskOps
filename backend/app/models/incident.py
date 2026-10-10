@@ -58,6 +58,7 @@ class Incident(Base):
     routing_decision = Column(String(50), nullable=True)
     top_features = Column(JSONB, nullable=True)
     affected_services = Column(JSONB, nullable=True)
+    data_mode = Column(String(20), nullable=False, default="demo", index=True)
 
     detected_at = Column(
         DateTime(timezone=True),

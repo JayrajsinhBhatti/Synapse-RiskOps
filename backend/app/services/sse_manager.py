@@ -92,6 +92,10 @@ class SSEManager:
         for q in dead_queues:
             self._subscribers.discard(q)
 
+    async def broadcast_event(self, event: str, data: Any):
+        """Alias for broadcast."""
+        await self.broadcast(event, data)
+
     async def broadcast_incident_created(self, incident: Any):
         """Helper to broadcast an incident creation event."""
         def _val(attr: str):
@@ -148,6 +152,34 @@ class SSEManager:
     async def broadcast_risk_alert(self, alert_data: Dict[str, Any]):
         """Helper to broadcast high-risk alert event from ML Engine."""
         await self.broadcast("risk_alert", alert_data)
+
+    async def broadcast_system_mode_changed(self, mode: str, updated_by: Optional[str] = None):
+        """Broadcast workspace operational mode transition (demo <-> connected)."""
+        await self.broadcast("system_mode_changed", {"mode": mode, "updated_by": updated_by})
+
+    async def broadcast_retention_purged(self, module: str, records_deleted: int, cutoff: Optional[str] = None):
+        """Broadcast time-based retention pruning event."""
+        await self.broadcast("retention_purged", {
+            "module": module,
+            "records_deleted": records_deleted,
+            "cutoff_timestamp": cutoff,
+        })
+
+    async def broadcast_incidents_bulk_deleted(self, count: int, mode: Optional[str] = None):
+        """Broadcast bulk deletion of all incidents."""
+        await self.broadcast("incidents_bulk_deleted", {"count": count, "mode": mode})
+
+    async def broadcast_risk_assessments_bulk_deleted(self, count: int, mode: Optional[str] = None):
+        """Broadcast bulk deletion of all risk assessments."""
+        await self.broadcast("risk_assessments_bulk_deleted", {"count": count, "mode": mode})
+
+    async def broadcast_risk_assessment_deleted(self, assessment_id: Any):
+        """Broadcast individual risk assessment deletion."""
+        await self.broadcast("risk_assessment_deleted", {"id": str(assessment_id)})
+
+    async def broadcast_incident_history_deleted(self, history_id: Any):
+        """Broadcast individual incident history deletion."""
+        await self.broadcast("incident_history_deleted", {"id": str(history_id)})
 
     async def clear_all(self):
         """Discard all current subscribers."""
