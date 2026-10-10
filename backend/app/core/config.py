@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     EMAIL_NOTIFICATIONS_ENABLED: bool = True
 
+    # Operational Telemetry Retention
+    LOG_RETENTION_DAYS: int = 10
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

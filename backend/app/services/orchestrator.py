@@ -305,7 +305,7 @@ class OrchestrationService:
         # 2. ML Engine analysis
         ml_data = await self._call_ml_engine_analyze(service_name, metrics)
         prediction_block = ml_data.get("prediction", {})
-        diagnosis_block = ml_data.get("diagnosis", {})
+        diagnosis_block = ml_data.get("diagnosis", {}) or ml_data.get("diagnosis_context", {})
 
         risk_score = float(prediction_block.get("risk_score", 85.0))
         ml_conf = float(prediction_block.get("confidence", 0.90))
@@ -315,13 +315,20 @@ class OrchestrationService:
         severity = "CRITICAL" if risk_score >= 75.0 else "HIGH" if risk_score >= 40.0 else "MEDIUM"
 
         # 3. Handle Deduplication / Debouncing / Recovery
-        is_recovered = (risk_score < 60.0) or (not prediction_block.get("anomaly_detail", {}).get("is_anomaly", True) and risk_score < 75.0)
+        # Strict recovery verification: only recover when telemetry metrics are demonstrably back within safe thresholds
+        err_val = float(metrics.get("error_rate", 0.0))
+        lat_val = float(metrics.get("response_time_p99", 0.0))
+        cpu_val = float(metrics.get("cpu_usage", 0.0))
+        has_anom = bool(prediction_block.get("anomaly_detail", {}).get("is_anomaly", False))
+        
+        is_recovered = (risk_score < 45.0) and (err_val < 3.0) and (lat_val < 150.0) and (cpu_val < 75.0) and (not has_anom)
         if existing_incident is not None:
             if is_recovered:
                 # RECOVERY: service returned to normal/healthy (Section 7.10)
                 existing_incident.status = "RESOLVED"
                 existing_incident.resolved_at = now
                 existing_incident.risk_score = Decimal(str(round(risk_score, 2)))
+
                 if db:
                     db.add(
                         IncidentHistory(

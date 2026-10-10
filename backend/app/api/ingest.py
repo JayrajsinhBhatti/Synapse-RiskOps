@@ -113,9 +113,11 @@ async def ingest_metrics(
                 current_user=current_user,
                 data_mode=payload.data_mode or "connected",
             )
+            await db.commit()
             incident_triggered = True
         except Exception as e:
             logger.warning(f"Error executing orchestrator lifecycle for ingested metric: {e}")
+
 
     # 4. Broadcast real-time SSE telemetry event
     await sse_manager.broadcast(

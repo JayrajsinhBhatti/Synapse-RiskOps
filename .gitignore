@@ -30,3 +30,6 @@ node_modules/
 # ===== ML model artifacts =====
 ml-engine/app/models/*.pkl
 ml-engine/app/models/*.joblib
+
+# ===== Archives =====
+*.zip

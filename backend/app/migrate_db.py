@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS workspace_settings (
     updated_at  TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id                  VARCHAR(50) PRIMARY KEY,
+    action              VARCHAR(100) NOT NULL,
+    scope               VARCHAR(100) NOT NULL,
+    reason              TEXT NOT NULL,
+    records_affected    INT DEFAULT 0,
+    performed_by        VARCHAR(100) NOT NULL,
+    performed_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    metadata_json       JSONB
+);
+
 CREATE INDEX IF NOT EXISTS idx_incidents_data_mode ON incidents(data_mode);
 CREATE INDEX IF NOT EXISTS idx_risk_assessments_data_mode ON risk_assessments(data_mode);
 """

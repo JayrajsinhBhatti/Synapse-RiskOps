@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  live-microservices-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synapse-live-microservices-demo
+    restart: unless-stopped
+    ports:
+      - "9100:9100"  # Storefront Web UI
+      - "9101:9101"  # API Gateway
+      - "9102:9102"  # Auth Service
+      - "9103:9103"  # User Service
+      - "9104:9104"  # Catalog Service
+      - "9105:9105"  # Inventory Service
+      - "9106:9106"  # Cart Service
+      - "9107:9107"  # Order Service
+      - "9108:9108"  # Payment Service
+      - "9109:9109"  # Notification Service
+      - "9110:9110"  # Recommendation Service
+    environment:
+      - SYNAPSE_BACKEND_URL=http://host.docker.internal:8080
+      - GATEWAY_URL=http://localhost:9101/api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

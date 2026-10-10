@@ -35,6 +35,16 @@ export async function verifyConnection(payload) {
 }
 
 /**
+ * Admin connect/disconnect of external 10-microservice demo application.
+ * @param {'connect' | 'disconnect'} action
+ * @param {string} gatewayUrl
+ */
+export async function connectDemoApp(action = 'connect', gatewayUrl = 'http://localhost:9101') {
+  return apiClient.post('/system/connect-demo-app', { action, gateway_url: gatewayUrl });
+}
+
+
+/**
  * Retrieve previous 24–48 hours of metrics from Prometheus to solve ML cold-start.
  * @param {Object} payload { hours: 24 | 48, prometheus_url, auth_type, auth_token, services }
  */

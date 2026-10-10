@@ -12,7 +12,8 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSystemMode, setSystemMode } from '../api/system';
+import { getSystemMode, setSystemMode, connectDemoApp } from '../api/system';
+
 
 const WorkspaceContext = createContext(null);
 
@@ -21,6 +22,8 @@ export function WorkspaceProvider({ children }) {
   const [mode, setMode] = useState(() => {
     return localStorage.getItem('synapse_operational_mode') || 'demo';
   });
+  const [externalAppConnected, setExternalAppConnected] = useState(false);
+  const [externalAppInfo, setExternalAppInfo] = useState(null);
   const [workspaceConfig, setWorkspaceConfig] = useState(() => {
     try {
       const saved = localStorage.getItem('synapse_workspace_config');
@@ -30,6 +33,7 @@ export function WorkspaceProvider({ children }) {
     }
   });
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+  const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
 
   // Sync mode with backend on mount if authenticated
@@ -42,11 +46,12 @@ export function WorkspaceProvider({ children }) {
       .then((data) => {
         if (isMounted && data?.mode) {
           setMode(data.mode);
+          setExternalAppConnected(Boolean(data.external_app_connected));
+          setExternalAppInfo(data.external_app_info || null);
           localStorage.setItem('synapse_operational_mode', data.mode);
         }
       })
       .catch((err) => {
-        // Fallback gracefully to locally stored mode
         console.debug('Failed to sync backend operational mode, using local state:', err);
       });
 
@@ -61,12 +66,56 @@ export function WorkspaceProvider({ children }) {
       if (e.detail?.mode && e.detail.mode !== mode) {
         setMode(e.detail.mode);
         localStorage.setItem('synapse_operational_mode', e.detail.mode);
+        getSystemMode().then((data) => {
+          if (data) {
+            setExternalAppConnected(Boolean(data.external_app_connected));
+            setExternalAppInfo(data.external_app_info || null);
+          }
+        }).catch(() => {});
         queryClient.invalidateQueries();
       }
     };
     window.addEventListener('synapse:mode-changed', handleModeChanged);
     return () => window.removeEventListener('synapse:mode-changed', handleModeChanged);
   }, [mode, queryClient]);
+
+  // Connect external demo microservices website (Admin action)
+  const connectWebsite = useCallback(
+    async (gatewayUrl = 'http://localhost:9101') => {
+      setIsSwitching(true);
+      try {
+        const res = await connectDemoApp('connect', gatewayUrl);
+        setMode('connected');
+        setExternalAppConnected(true);
+        setExternalAppInfo(res?.services ? { services: res.services, gateway_url: gatewayUrl } : null);
+        localStorage.setItem('synapse_operational_mode', 'connected');
+        queryClient.invalidateQueries();
+        return res;
+      } finally {
+        setIsSwitching(false);
+      }
+    },
+    [queryClient]
+  );
+
+  // Disconnect external demo microservices website (Admin action)
+  const disconnectWebsite = useCallback(
+    async () => {
+      setIsSwitching(true);
+      try {
+        const res = await connectDemoApp('disconnect');
+        setMode('demo');
+        setExternalAppConnected(false);
+        setExternalAppInfo(null);
+        localStorage.setItem('synapse_operational_mode', 'demo');
+        queryClient.invalidateQueries();
+        return res;
+      } finally {
+        setIsSwitching(false);
+      }
+    },
+    [queryClient]
+  );
 
   // Switch mode action
   const switchMode = useCallback(
@@ -86,7 +135,6 @@ export function WorkspaceProvider({ children }) {
         setMode(actualMode);
         localStorage.setItem('synapse_operational_mode', actualMode);
 
-        // Update stored workspace config
         const updatedConfig = {
           ...(workspaceConfig || {}),
           operationalMode: actualMode,
@@ -97,7 +145,6 @@ export function WorkspaceProvider({ children }) {
         localStorage.setItem('synapse_workspace_config', JSON.stringify(updatedConfig));
         setWorkspaceConfig(updatedConfig);
 
-        // Invalidate all react queries to immediately update UI without mixed data
         queryClient.invalidateQueries();
         setIsModeModalOpen(false);
         return res;
@@ -112,12 +159,19 @@ export function WorkspaceProvider({ children }) {
     mode,
     isDemoMode: mode === 'demo',
     isConnectedMode: mode === 'connected',
+    externalAppConnected,
+    externalAppInfo,
     workspaceConfig,
     isSwitching,
     switchMode,
     isModeModalOpen,
     openModeModal: () => setIsModeModalOpen(true),
     closeModeModal: () => setIsModeModalOpen(false),
+    isConnectModalOpen,
+    openConnectModal: () => setIsConnectModalOpen(true),
+    closeConnectModal: () => setIsConnectModalOpen(false),
+    connectWebsite,
+    disconnectWebsite,
   };
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
@@ -130,3 +184,4 @@ export function useWorkspace() {
   }
   return context;
 }
+

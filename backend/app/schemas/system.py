@@ -14,10 +14,29 @@ class SystemModeResponse(BaseModel):
     """Current operational mode and connectivity metadata."""
     mode: str = Field(..., description="'demo' or 'connected'")
     is_live_telemetry_active: bool = False
+    external_app_connected: bool = False
+    external_app_info: Optional[Dict[str, Any]] = None
     prometheus_url: Optional[str] = None
     telemetry_bridge_url: Optional[str] = None
     connected_services: List[str] = []
     updated_at: Optional[datetime] = None
+
+
+class ConnectDemoAppRequest(BaseModel):
+    """Admin request to connect or disconnect the external 10-microservice demo application."""
+    action: str = Field("connect", description="'connect' or 'disconnect'")
+    gateway_url: Optional[str] = Field("http://localhost:9101", description="Demo API Gateway base URL")
+
+
+class ConnectDemoAppResponse(BaseModel):
+    """Response returned upon connecting or disconnecting the demo application."""
+    success: bool
+    mode: str
+    external_app_connected: bool
+    services: List[str] = []
+    message: str
+    timestamp: str
+
 
 
 class SystemModeUpdateRequest(BaseModel):

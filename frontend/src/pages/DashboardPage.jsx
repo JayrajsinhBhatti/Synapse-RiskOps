@@ -224,7 +224,7 @@ export default function DashboardPage({ activeView, onViewChange }) {
     },
     {
       label: 'Services Monitored',
-      value: reliabilityData?.services_monitored_count ?? (services.length || 12),
+      value: services.length || (reliabilityData?.services_monitored_count ?? 0),
       icon: Server,
       iconBg: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/25',
       trend: 'stable',

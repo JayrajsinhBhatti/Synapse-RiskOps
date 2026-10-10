@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synapse Hardware Hub — Live Microservices E-Commerce</title>
+  <!-- Tailwind CDN & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            },
+            telemetry: {
+              cyan: '#00f2fe',
+              emerald: '#10b981',
+              amber: '#f59e0b',
+              rose: '#f43f5e',
+            },
+            obsidian: {
+              900: '#07090e',
+              800: '#0f131c',
+              700: '#161d2b',
+              600: '#212c40',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glass { background: rgba(15, 19, 28, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .glow-cyan { box-shadow: 0 0 20px -3px rgba(0, 242, 254, 0.25); }
+    .glow-indigo { box-shadow: 0 0 20px -3px rgba(99, 102, 241, 0.25); }
+  </style>
+</head>
+<body class="bg-slate-50 dark:bg-obsidian-900 text-slate-900 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
+
+  <!-- ================= TOP NOTIFICATION / OBSERVABILITY BANNER ================= -->
+  <div class="bg-brand-600 dark:bg-obsidian-800 text-white text-xs px-4 py-2 border-b border-white/10 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-telemetry-cyan/20 text-telemetry-cyan border border-telemetry-cyan/40">
+        LIVE MICROSERVICES
+      </span>
+      <span class="hidden sm:inline">10 Interconnected Microservices monitored by Synapse RiskOps</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="gateway-status-pill" class="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        API Gateway :9101 Active
+      </span>
+      <button onclick="toggleTheme()" class="hover:text-telemetry-cyan text-slate-300 transition-colors">
+        <i data-lucide="sun" class="w-3.5 h-3.5 hidden dark:block"></i>
+        <i data-lucide="moon" class="w-3.5 h-3.5 block dark:hidden"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= HEADER & NAVIGATION ================= -->
+  <header class="sticky top-0 z-30 glass border-b dark:border-white/10 border-slate-200 bg-white/80 dark:bg-obsidian-900/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <!-- Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-telemetry-cyan flex items-center justify-center text-white shadow-lg shadow-brand-500/20">
+          <i data-lucide="cpu" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <span class="text-base font-extrabold tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">SYNAPSE</span>
+          <span class="text-xs font-semibold text-telemetry-cyan block -mt-1 tracking-wider uppercase">Hardware Hub</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="hidden md:flex items-center gap-1 text-sm font-medium">
+        <button onclick="switchTab('store')" id="tab-btn-store" class="px-3.5 py-1.5 rounded-lg text-telemetry-cyan bg-white/5 font-semibold transition-all">Storefront</button>
+        <button onclick="switchTab('orders')" id="tab-btn-orders" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">My Orders</button>
+        <button onclick="switchTab('operations')" id="tab-btn-operations" class="px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white flex items-center gap-1.5 transition-all">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+          Operations & Chaos
+        </button>
+      </nav>
+
+      <!-- Actions: Search, Notifications, Cart, User -->
+      <div class="flex items-center gap-3">
+        <!-- Search bar -->
+        <div class="relative hidden sm:block w-48 lg:w-64">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
+          <input type="text" id="search-input" onkeyup="handleSearch(event)" placeholder="Search hardware..." class="w-full pl-9 pr-3 py-1.5 rounded-lg text-xs bg-slate-100 dark:bg-obsidian-800 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:border-telemetry-cyan">
+        </div>
+
+        <!-- Notifications button -->
+        <button onclick="toggleNotifications()" class="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all" title="Notifications">
+          <i data-lucide="bell" class="w-5 h-5"></i>
+          <span id="notif-badge" class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-telemetry-cyan hidden"></span>
+        </button>
+
+        <!-- Cart button -->
+        <button onclick="openCart()" class="relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium text-xs shadow-md shadow-brand-500/20 transition-all">
+          <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+          <span id="cart-count" class="font-mono font-bold">0</span>
+        </button>
+
+        <!-- User profile button -->
+        <div id="user-pill-container">
+          <button onclick="openAuthModal()" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/15 text-xs font-semibold hover:bg-white/5 transition-all">
+            Sign In
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= MAIN CONTENT CONTAINER ================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- ================= VIEW 1: STOREFRONT ================= -->
+    <div id="view-store" class="space-y-10">
+      <!-- Hero Banner -->
+      <div class="relative rounded-2xl overflow-hidden glass p-8 sm:p-12 border dark:border-white/10 border-slate-200 bg-gradient-to-r from-obsidian-800 to-obsidian-900 glow-indigo">
+        <div class="relative z-10 max-w-2xl space-y-4">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-brand-500/10 text-brand-400 border border-brand-500/30">
+            <i data-lucide="zap" class="w-3.5 h-3.5 text-telemetry-cyan"></i> Real-Time Microservice Simulation
+          </div>
+          <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
+            High-Performance AI & Cloud Infrastructure Hardware
+          </h1>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            Experience complete distributed transactions: orders reserve real warehouse inventory, authorize financial charges, trigger notifications, and stream live metrics to Synapse RiskOps.
+          </p>
+          <div class="flex items-center gap-3 pt-2">
+            <button onclick="quickDemoOrder()" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-telemetry-cyan hover:opacity-90 text-white font-bold text-xs flex items-center gap-2 shadow-lg transition-all">
+              <i data-lucide="shopping-bag" class="w-4 h-4"></i>
+              Simulate 1-Click Purchase Workflow
+            </button>
+            <button onclick="switchTab('operations')" class="px-4 py-2.5 rounded-xl border border-white/20 text-white text-xs font-semibold hover:bg-white/5 transition-all">
+              View Microservices Map (10/10)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Categories Filter Bar -->
+      <div class="flex items-center justify-between gap-4 flex-wrap border-b dark:border-white/10 border-slate-200 pb-4">
+        <div id="category-pills" class="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          <!-- Populated dynamically -->
+          <button class="px-3 py-1.5 rounded-lg bg-telemetry-cyan/20 text-telemetry-cyan font-semibold border border-telemetry-cyan/30">All Items</button>
+        </div>
+        <div class="text-xs text-slate-400 font-mono" id="product-count-label">
+          Loading catalog...
+        </div>
+      </div>
+
+      <!-- Product Catalog Grid -->
+      <div id="products-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- Products populated via app.js -->
+        <div class="col-span-full py-12 text-center text-slate-400">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-telemetry-cyan"></i>
+          Loading product catalog from catalog-service...
+        </div>
+      </div>
+
+      <!-- AI Recommended Section -->
+      <div class="pt-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="sparkles" class="w-5 h-5 text-telemetry-cyan"></i>
+            <h2 class="text-lg font-bold text-white">Recommended for High-Resilience Infrastructure</h2>
+          </div>
+          <span class="text-xs font-mono text-slate-400">Powered by recommendation-service :9110</span>
+        </div>
+        <div id="recommendations-container" class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= VIEW 2: ORDERS HISTORY ================= -->
+    <div id="view-orders" class="space-y-6 hidden">
+      <div class="flex items-center justify-between border-b dark:border-white/10 border-slate-200 pb-4">
+        <div>
+          <h2 class="text-xl font-bold text-white">Order History & Receipts</h2>
+          <p class="text-xs text-slate-400">Verified multi-service transactions handled by order-service :9107</p>
+        </div>
+        <button onclick="fetchOrders()" class="text-xs px-3 py-1.5 rounded-lg border border-white/15 text-slate-300 hover:text-white flex items-center gap-1.5">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+        </button>
+      </div>
+
+      <div id="orders-list-container" class="space-y-4">
+        <!-- Populated via app.js -->
+      </div>
+    </div>
+
+    <!-- ================= VIEW 3: OPERATIONS & CHAOS INJECTION ================= -->
+    <div id="view-operations" class="space-y-8 hidden">
+      <div class="flex items-center justify-between border-b dark:border-white/10 border-slate-200 pb-4">
+        <div>
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <i data-lucide="activity" class="w-5 h-5 text-telemetry-cyan"></i>
+            10 Microservices Health & Chaos Engineering Control Plane
+          </h2>
+          <p class="text-xs text-slate-400">Real-time telemetry and controlled fault injection to test Synapse RiskOps detection</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button onclick="fetchSystemStatus()" class="text-xs px-3 py-1.5 rounded-lg border border-white/15 text-slate-300 hover:text-white flex items-center gap-1.5">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Poll Now
+          </button>
+          <button onclick="clearAllChaos()" class="text-xs px-3 py-1.5 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600/30 flex items-center gap-1.5 font-bold">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Clear All Faults
+          </button>
+        </div>
+      </div>
+
+      <!-- Microservices Grid -->
+      <div id="services-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- Populated via app.js -->
+      </div>
+
+      <!-- Quick Chaos Scenarios Card -->
+      <div class="glass rounded-xl p-6 border dark:border-white/10 border-slate-200 space-y-4">
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <i data-lucide="flame" class="w-4 h-4 text-telemetry-amber"></i>
+          Pre-Configured Fault Scenarios for Faculty Demo
+        </h3>
+        <p class="text-xs text-slate-400 leading-relaxed">
+          Click any scenario to inject controlled anomalies into the running microservices. Watch Synapse RiskOps detect the threshold breach, update the risk score, isolate the root cause, and forecast failure!
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+          <div class="p-4 rounded-xl border border-white/10 bg-white/5 space-y-2">
+            <span class="text-xs font-bold text-amber-400 block">Scenario 1: Payment Latency Spike</span>
+            <p class="text-[11px] text-slate-300">Injects 2.5s delay into payment-service :9108. Causes checkout latency & downstream timeouts in order-service.</p>
+            <button onclick="injectChaos('payment-service', 'latency', 120, 0.9)" class="w-full mt-2 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40">
+              Inject Payment Latency
+            </button>
+          </div>
+
+          <div class="p-4 rounded-xl border border-white/10 bg-white/5 space-y-2">
+            <span class="text-xs font-bold text-rose-400 block">Scenario 2: Inventory Stock Outage</span>
+            <p class="text-[11px] text-slate-300">Injects 500 error rate into inventory-service :9105. Causes catalog stock lookups and checkout reservations to fail.</p>
+            <button onclick="injectChaos('inventory-service', 'error_rate', 120, 0.85)" class="w-full mt-2 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold border border-rose-500/40">
+              Inject Inventory Errors
+            </button>
+          </div>
+
+          <div class="p-4 rounded-xl border border-white/10 bg-white/5 space-y-2">
+            <span class="text-xs font-bold text-purple-400 block">Scenario 3: Gateway CPU Overload</span>
+            <p class="text-[11px] text-slate-300">Spins 4 CPU worker threads on api-gateway :9101. Spikes CPU past 80% threshold to test Isolation Forest anomaly detector.</p>
+            <button onclick="injectChaos('api-gateway', 'cpu_spike', 120, 1.0)" class="w-full mt-2 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-bold border border-purple-500/40">
+              Inject CPU Spike
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ================= CART DRAWER ================= -->
+  <div id="cart-drawer" class="fixed inset-y-0 right-0 w-full max-w-md glass bg-obsidian-900 border-l border-white/10 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 flex flex-col">
+    <div class="p-5 border-b border-white/10 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <i data-lucide="shopping-bag" class="w-5 h-5 text-telemetry-cyan"></i>
+        <h3 class="text-base font-bold text-white">Your Shopping Cart</h3>
+      </div>
+      <button onclick="closeCart()" class="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <div id="cart-items-container" class="flex-1 overflow-y-auto p-5 space-y-4">
+      <!-- Items dynamically populated -->
+    </div>
+
+    <div class="p-5 border-t border-white/10 space-y-3 bg-obsidian-800/60">
+      <div class="flex items-center justify-between text-sm">
+        <span class="text-slate-400">Subtotal:</span>
+        <span id="cart-subtotal" class="font-mono font-bold text-white text-base">$0.00</span>
+      </div>
+      <p class="text-[11px] text-slate-400">Taxes & shipping calculated at checkout via payment-service</p>
+      <button id="checkout-btn" onclick="openCheckoutModal()" class="w-full py-3 rounded-xl bg-gradient-to-r from-brand-600 to-telemetry-cyan text-white font-bold text-sm shadow-lg shadow-brand-500/25 hover:opacity-95 transition-all flex items-center justify-center gap-2">
+        Proceed to Checkout
+        <i data-lucide="arrow-right" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= CHECKOUT MODAL ================= -->
+  <div id="checkout-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass bg-obsidian-900 border border-white/15 rounded-2xl max-w-lg w-full p-6 space-y-6 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <i data-lucide="credit-card" class="w-5 h-5 text-telemetry-cyan"></i>
+          Complete Order & Payment
+        </h3>
+        <button onclick="closeCheckoutModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1">Shipping Address</label>
+          <input type="text" id="checkout-address" value="Synapse Data Center, Bay Area, CA" class="w-full px-3 py-2 rounded-lg bg-obsidian-800 border border-white/10 text-white focus:outline-none focus:border-telemetry-cyan">
+        </div>
+
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1">Payment Method</label>
+          <select id="checkout-payment-method" class="w-full px-3 py-2 rounded-lg bg-obsidian-800 border border-white/10 text-white focus:outline-none focus:border-telemetry-cyan">
+            <option value="credit_card">Corporate Credit Card (simulated)</option>
+            <option value="upi">Instant UPI Transfer (simulated)</option>
+            <option value="netbanking">Direct Wire Transfer (simulated)</option>
+          </select>
+        </div>
+
+        <div class="p-3 rounded-xl bg-white/5 border border-white/10 space-y-1">
+          <div class="flex justify-between font-mono">
+            <span class="text-slate-400">Total Charged:</span>
+            <span id="checkout-total-label" class="font-bold text-white text-sm">$0.00</span>
+          </div>
+          <span class="text-[10px] text-slate-400 block">Inventory will be atomically reserved across order-service and payment-service.</span>
+        </div>
+      </div>
+
+      <div id="checkout-status-msg" class="text-xs font-mono hidden"></div>
+
+      <div class="flex items-center justify-end gap-3 pt-2">
+        <button onclick="closeCheckoutModal()" class="px-4 py-2 rounded-xl text-xs text-slate-300 hover:bg-white/5">Cancel</button>
+        <button id="submit-checkout-btn" onclick="submitCheckout()" class="px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg">
+          Authorize & Pay
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= AUTH MODAL ================= -->
+  <div id="auth-modal" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass bg-obsidian-900 border border-white/15 rounded-2xl max-w-sm w-full p-6 space-y-5 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3">
+        <h3 id="auth-modal-title" class="text-base font-bold text-white">Sign In</h3>
+        <button onclick="closeAuthModal()" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1">Username</label>
+          <input type="text" id="auth-username" value="admin" class="w-full px-3 py-2 rounded-lg bg-obsidian-800 border border-white/10 text-white focus:outline-none focus:border-telemetry-cyan">
+        </div>
+        <div>
+          <label class="block text-slate-300 font-semibold mb-1">Password</label>
+          <input type="password" id="auth-password" value="admin123" class="w-full px-3 py-2 rounded-lg bg-obsidian-800 border border-white/10 text-white focus:outline-none focus:border-telemetry-cyan">
+        </div>
+        <div id="auth-error-msg" class="text-rose-400 font-mono text-[11px] hidden"></div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2">
+        <span class="text-[11px] text-slate-400">Demo: admin / admin123</span>
+        <button onclick="submitAuth()" class="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold">
+          Sign In
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= NOTIFICATIONS DRAWER ================= -->
+  <div id="notif-drawer" class="fixed inset-y-0 right-0 w-80 glass bg-obsidian-900 border-l border-white/10 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 flex flex-col">
+    <div class="p-4 border-b border-white/10 flex items-center justify-between">
+      <h3 class="text-sm font-bold text-white flex items-center gap-2">
+        <i data-lucide="bell" class="w-4 h-4 text-telemetry-cyan"></i>
+        Activity Notifications
+      </h3>
+      <button onclick="toggleNotifications()" class="text-slate-400 hover:text-white">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+    <div id="notif-list-container" class="flex-1 overflow-y-auto p-4 space-y-3">
+      <!-- Populated via app.js -->
+    </div>
+  </div>
+
+  <!-- Toast Notification Overlay -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 glass px-4 py-3 rounded-xl shadow-2xl text-xs font-medium text-white flex items-center gap-2 transform translate-y-20 opacity-0 transition-all duration-300">
+    <span id="toast-text">Action completed</span>
+  </div>
+
+  <!-- Scripts -->
+  <script src="app.js"></script>
+</body>
+</html>

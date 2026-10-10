@@ -33,6 +33,9 @@ router = APIRouter(
 )
 
 
+from app.models.retention import WorkspaceSetting
+
+
 @router.get(
     "",
     response_model=List[ServiceResponse],
@@ -45,7 +48,18 @@ async def list_services(
     current_user: User = Depends(get_current_user),
 ):
     """Retrieve all microservices registered in the platform."""
+    # Check active workspace mode
+    setting_res = await db.execute(
+        select(WorkspaceSetting).where(WorkspaceSetting.key == "system_mode")
+    )
+    setting = setting_res.scalar_one_or_none()
+    is_ext_connected = bool(setting and isinstance(setting.value, dict) and setting.value.get("external_app_connected"))
+    active_svcs = setting.value.get("config", {}).get("services") if (setting and is_ext_connected) else None
+
     query = select(Service).order_by(Service.service_name.asc())
+
+    if is_ext_connected and active_svcs:
+        query = query.where(Service.service_name.in_(active_svcs))
 
     if is_active is not None:
         query = query.where(Service.is_active == is_active)
@@ -70,13 +84,33 @@ async def get_topology(
     Returns the complete microservice dependency graph (nodes + directed edges).
     Powers the React architecture map in Week 6.
     """
-    # Fetch all services
-    svc_result = await db.execute(select(Service).order_by(Service.service_name.asc()))
+    # Check active workspace mode
+    setting_res = await db.execute(
+        select(WorkspaceSetting).where(WorkspaceSetting.key == "system_mode")
+    )
+    setting = setting_res.scalar_one_or_none()
+    is_ext_connected = bool(setting and isinstance(setting.value, dict) and setting.value.get("external_app_connected"))
+    active_svcs = setting.value.get("config", {}).get("services") if (setting and is_ext_connected) else None
+
+    # Fetch services
+    svc_query = select(Service).order_by(Service.service_name.asc())
+    if is_ext_connected and active_svcs:
+        svc_query = svc_query.where(Service.service_name.in_(active_svcs))
+
+    svc_result = await db.execute(svc_query)
     services = svc_result.scalars().all()
     service_map = {s.id: s.service_name for s in services}
+    service_ids = set(service_map.keys())
 
-    # Fetch all dependencies
-    dep_result = await db.execute(select(ServiceDependency))
+    # Fetch dependencies scoped to active services
+    dep_query = select(ServiceDependency)
+    if is_ext_connected and service_ids:
+        dep_query = dep_query.where(
+            ServiceDependency.source_service_id.in_(service_ids),
+            ServiceDependency.target_service_id.in_(service_ids),
+        )
+
+    dep_result = await db.execute(dep_query)
     deps = dep_result.scalars().all()
 
     dep_responses = [

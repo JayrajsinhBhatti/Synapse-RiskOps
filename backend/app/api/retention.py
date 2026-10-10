@@ -13,10 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import uuid
+from pydantic import BaseModel, Field
+
 from app.api.auth import get_current_user_or_system, require_role
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.incident import Incident, IncidentHistory
-from app.models.retention import RetentionPolicy
+from app.models.retention import RetentionPolicy, AdminAuditLog
 from app.models.risk_assessment import RiskAssessment
 from app.models.user import User
 from app.schemas.system import (
@@ -28,6 +32,22 @@ from app.schemas.system import (
 from app.services.sse_manager import sse_manager
 
 logger = logging.getLogger("synapse.retention")
+
+class AdminLogClearRequest(BaseModel):
+    confirm: bool = Field(..., description="Must explicitly be true to confirm deletion")
+    reason: str = Field(..., min_length=3, description="Audit justification for log clearance")
+    scope: str = Field("operational_telemetry", description="'operational_telemetry' or 'transient_risk_assessments'")
+    older_than_days: Optional[int] = Field(None, ge=0, description="Delete records older than N days (defaults to LOG_RETENTION_DAYS)")
+
+class AdminLogClearResponse(BaseModel):
+    success: bool
+    records_cleared: int
+    cleared_by: str
+    cleared_at: str
+    scope: str
+    reason: str
+    audit_id: str
+    message: str
 
 router = APIRouter(
     prefix="/api/retention",
@@ -248,3 +268,130 @@ async def trigger_retention_purge(
         purged_at=datetime.now(timezone.utc).isoformat(),
         message=f"Pruned {records_deleted} records older than {period}.",
     )
+
+
+@router.get(
+    "/config",
+    summary="Get active operational telemetry retention configuration",
+)
+async def get_retention_config():
+    """Returns the default and active operational log retention policy."""
+    return {
+        "log_retention_days": getattr(settings, "LOG_RETENTION_DAYS", 10),
+        "default_retention_period": f"{getattr(settings, 'LOG_RETENTION_DAYS', 10)}d",
+        "description": "Operational telemetry logs retained for 10 days by default. Automatically pruned.",
+        "admin_clearance_supported": True,
+    }
+
+
+@router.post(
+    "/admin/clear-logs",
+    response_model=AdminLogClearResponse,
+    summary="ADMIN-only manual operational log clearance with audit trail",
+)
+async def admin_clear_operational_logs(
+    payload: AdminLogClearRequest,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_role(["ADMIN", "admin"])),
+):
+    """
+    ADMIN-only control to safely clear operational telemetry logs.
+    Enforces ADMIN role, requires explicit confirmation, records reason in an immutable audit record,
+    and protects all critical business records (incidents, users, services, topology).
+    """
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation flag 'confirm' must be explicitly True to execute manual log clearance.",
+        )
+
+    if not payload.reason.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Audit reason is required for administrative log clearance.",
+        )
+
+    # Determine cutoff timestamp
+    days = payload.older_than_days if payload.older_than_days is not None else getattr(settings, "LOG_RETENTION_DAYS", 10)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    records_deleted = 0
+
+    if payload.scope in ("operational_telemetry", "all_transient_logs", "transient_risk_assessments"):
+        # Prune risk assessments older than cutoff (protecting incidents and audit trails)
+        risk_del = await db.execute(
+            delete(RiskAssessment).where(RiskAssessment.assessed_at < cutoff)
+        )
+        records_deleted = risk_del.rowcount or 0
+
+    audit_id = f"audit-clear-{uuid.uuid4().hex[:10]}"
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    # Record in immutable AdminAuditLog table
+    audit_entry = AdminAuditLog(
+        id=audit_id,
+        action="MANUAL_LOG_CLEARANCE",
+        scope=payload.scope,
+        reason=payload.reason.strip(),
+        records_affected=records_deleted,
+        performed_by=admin_user.username,
+        metadata_json={
+            "cutoff_timestamp": cutoff.isoformat(),
+            "days_threshold": days,
+            "admin_id": str(admin_user.id),
+        },
+    )
+    db.add(audit_entry)
+    await db.commit()
+
+    # Broadcast event via SSE
+    await sse_manager.broadcast(
+        "admin_logs_cleared",
+        {
+            "audit_id": audit_id,
+            "scope": payload.scope,
+            "records_cleared": records_deleted,
+            "cleared_by": admin_user.username,
+            "cleared_at": now_str,
+        },
+    )
+
+    logger.info(
+        f"Admin [{admin_user.username}] manually cleared {records_deleted} records in scope '{payload.scope}' (reason: '{payload.reason}')"
+    )
+
+    return AdminLogClearResponse(
+        success=True,
+        records_cleared=records_deleted,
+        cleared_by=admin_user.username,
+        cleared_at=now_str,
+        scope=payload.scope,
+        reason=payload.reason.strip(),
+        audit_id=audit_id,
+        message=f"Successfully pruned {records_deleted} records older than {days} days. Audit record {audit_id} created.",
+    )
+
+
+@router.get(
+    "/admin/audit-trail",
+    summary="ADMIN-only view of administrative clearance audit logs",
+)
+async def get_admin_audit_trail(
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_role(["ADMIN", "admin"])),
+):
+    """Retrieve immutable audit history of administrative operations."""
+    res = await db.execute(select(AdminAuditLog).order_by(AdminAuditLog.performed_at.desc()).limit(50))
+    logs = res.scalars().all()
+    return [
+        {
+            "audit_id": l.id,
+            "action": l.action,
+            "scope": l.scope,
+            "reason": l.reason,
+            "records_affected": l.records_affected,
+            "performed_by": l.performed_by,
+            "performed_at": l.performed_at.isoformat() if l.performed_at else None,
+            "metadata": l.metadata_json or {},
+        }
+        for l in logs
+    ]

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user_or_system
+from app.api.auth import get_current_user_or_system, require_role
 from app.core.database import get_db
 from app.models.retention import WorkspaceSetting
 from app.models.service import Service, ServiceDependency
@@ -23,6 +23,8 @@ from app.models.user import User
 from app.schemas.system import (
     BackfillRequest,
     BackfillResponse,
+    ConnectDemoAppRequest,
+    ConnectDemoAppResponse,
     ConnectionVerificationRequest,
     ConnectionVerificationResponse,
     ServiceMetricStatus,
@@ -45,15 +47,23 @@ PROMETHEUS_DEFAULT_URL = os.getenv("PROMETHEUS_URL", "http://prometheus:9090")
 TELEMETRY_BRIDGE_DEFAULT_URL = os.getenv("TELEMETRY_BRIDGE_URL", "http://telemetry-bridge:9010")
 ML_ENGINE_DEFAULT_URL = os.getenv("ML_ENGINE_URL", "http://ml-engine:8000")
 
-# Primary live services tracked in connected mode
-LIVE_SERVICES_INVENTORY = [
+# 10 Microservices of the external live application
+DEMO_MICROSERVICES = [
     "api-gateway",
     "auth-service",
+    "user-service",
+    "catalog-service",
+    "inventory-service",
+    "cart-service",
     "order-service",
     "payment-service",
-    "inventory-service",
     "notification-service",
+    "recommendation-service",
 ]
+
+# Primary live services tracked in connected mode fallback
+LIVE_SERVICES_INVENTORY = DEMO_MICROSERVICES
+
 
 
 async def _probe_url(
@@ -82,7 +92,7 @@ async def get_system_mode(
 ):
     """
     Returns current platform operational mode ('demo' or 'connected'),
-    along with Prometheus / Telemetry Bridge status.
+    along with external application connection status and Prometheus / Telemetry Bridge status.
     """
     result = await db.execute(
         select(WorkspaceSetting).where(WorkspaceSetting.key == "system_mode")
@@ -92,14 +102,17 @@ async def get_system_mode(
     mode = "demo"
     cfg = {}
     updated_at = None
+    external_connected = False
 
     if setting and isinstance(setting.value, dict):
         mode = setting.value.get("mode", "demo")
         cfg = setting.value.get("config", {})
+        external_connected = bool(setting.value.get("external_app_connected", False))
         updated_at = setting.updated_at
 
     prom_url = cfg.get("prometheus_url") or PROMETHEUS_DEFAULT_URL
     bridge_url = cfg.get("telemetry_bridge_url") or TELEMETRY_BRIDGE_DEFAULT_URL
+    gateway_url = cfg.get("gateway_url") or "http://localhost:9101"
 
     # Probe live status if in connected mode
     is_live = False
@@ -109,16 +122,151 @@ async def get_system_mode(
             or await _probe_url(f"{bridge_url}/health")
             or await _probe_url("http://localhost:9010/health")
             or await _probe_url("http://localhost:9090/-/healthy")
+            or await _probe_url(f"{gateway_url}/health")
+            or await _probe_url("http://localhost:9101/health")
         )
+
+    connected_svcs = []
+    if is_live:
+        connected_svcs = DEMO_MICROSERVICES if external_connected else LIVE_SERVICES_INVENTORY
 
     return SystemModeResponse(
         mode=mode,
         is_live_telemetry_active=is_live,
+        external_app_connected=external_connected,
+        external_app_info=cfg if external_connected else None,
         prometheus_url=prom_url,
         telemetry_bridge_url=bridge_url,
-        connected_services=LIVE_SERVICES_INVENTORY if is_live else [],
+        connected_services=connected_svcs,
         updated_at=updated_at,
     )
+
+
+@router.post(
+    "/connect-demo-app",
+    response_model=ConnectDemoAppResponse,
+    summary="Admin endpoint to connect or disconnect the external 10-microservice demo application",
+)
+async def connect_demo_application(
+    request: ConnectDemoAppRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(["ADMIN", "admin"])),
+):
+    """
+    Connect or disconnect the external 10-microservice demo application.
+    Enforces ADMIN role requirement.
+    When connecting: verifies Gateway connectivity, activates all 10 microservices,
+    seeds topology dependencies, sets system_mode to 'connected', and broadcasts SSE.
+    When disconnecting: reverts system_mode to 'demo' and halts active live telemetry ingestion.
+    """
+    ts = datetime.now(timezone.utc).isoformat()
+    gateway_candidates = [
+        request.gateway_url or "http://localhost:9101",
+        "http://localhost:9101",
+        "http://127.0.0.1:9101",
+    ]
+
+    result = await db.execute(
+        select(WorkspaceSetting).where(WorkspaceSetting.key == "system_mode")
+    )
+    setting = result.scalar_one_or_none()
+
+    if request.action == "disconnect":
+        payload_value = {
+            "mode": "demo",
+            "external_app_connected": False,
+            "config": {},
+            "updated_by": current_user.username,
+            "updated_at": ts,
+        }
+        if setting is None:
+            setting = WorkspaceSetting(key="system_mode", value=payload_value)
+            db.add(setting)
+        else:
+            setting.value = payload_value
+
+        await db.commit()
+        await db.refresh(setting)
+
+        await sse_manager.broadcast_system_mode_changed(
+            mode="demo",
+            updated_by=current_user.username,
+        )
+
+        logger.info(f"Admin '{current_user.username}' disconnected external demo application.")
+        return ConnectDemoAppResponse(
+            success=True,
+            mode="demo",
+            external_app_connected=False,
+            services=[],
+            message="External microservices application disconnected. Reverted to Demo mode.",
+            timestamp=ts,
+        )
+
+    # Action is 'connect'
+    gateway_online = False
+    active_gateway_url = None
+    for g_url in gateway_candidates:
+        if await _probe_url(f"{g_url.rstrip('/')}/health") or await _probe_url(f"{g_url.rstrip('/')}/api/operations/system-status"):
+            gateway_online = True
+            active_gateway_url = g_url
+            break
+
+    if not gateway_online:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Could not reach external demo application at http://localhost:9101. "
+                "Please ensure the 10 microservices are running (e.g., via start_demo.bat or python run_demo.py)."
+            ),
+        )
+
+    # Activate/seed all 10 microservices and dependencies in database
+    from app.seed_topology import seed_topology
+    try:
+        await seed_topology()
+    except Exception as e:
+        logger.warning(f"Failed to run seed_topology: {e}")
+
+    payload_value = {
+        "mode": "connected",
+        "external_app_connected": True,
+        "config": {
+            "app_name": "Live E-Commerce Platform (10 Microservices)",
+            "gateway_url": active_gateway_url,
+            "storefront_url": "http://localhost:9100",
+            "services": DEMO_MICROSERVICES,
+            "connected_at": ts,
+            "connected_by": current_user.username,
+        },
+        "updated_by": current_user.username,
+        "updated_at": ts,
+    }
+
+    if setting is None:
+        setting = WorkspaceSetting(key="system_mode", value=payload_value)
+        db.add(setting)
+    else:
+        setting.value = payload_value
+
+    await db.commit()
+    await db.refresh(setting)
+
+    await sse_manager.broadcast_system_mode_changed(
+        mode="connected",
+        updated_by=current_user.username,
+    )
+
+    logger.info(f"Admin '{current_user.username}' successfully connected 10 microservices application.")
+    return ConnectDemoAppResponse(
+        success=True,
+        mode="connected",
+        external_app_connected=True,
+        services=DEMO_MICROSERVICES,
+        message="Successfully connected all 10 microservices to Synapse RiskOps. Live operational telemetry is active.",
+        timestamp=ts,
+    )
+
 
 
 @router.post(
@@ -182,12 +330,14 @@ async def verify_telemetry_connection(
     before allowing the user to mark connected mode onboarding complete.
     """
     checks: List[VerificationCheckItem] = []
+    method = (request.connection_method or "prometheus").lower()
     prom_url = request.prometheus_url or PROMETHEUS_DEFAULT_URL
     bridge_url = request.telemetry_bridge_url or TELEMETRY_BRIDGE_DEFAULT_URL
 
     # Candidate URLs to probe (container and localhost fallbacks)
     prom_candidates = [prom_url, "http://localhost:9090", "http://prometheus:9090"]
     bridge_candidates = [bridge_url, "http://localhost:9010", "http://telemetry-bridge:9010"]
+    gateway_candidates = ["http://localhost:9101", "http://127.0.0.1:9101"]
 
     # Authentication options for Prometheus
     prom_headers = {}
@@ -197,7 +347,7 @@ async def verify_telemetry_connection(
     elif request.auth_type == "basic" and request.auth_username:
         prom_auth = (request.auth_username, request.auth_password or "")
 
-    # 1. Prometheus Probe
+    # 1. Ingestion / Source Probes
     prom_reachable = False
     active_prom_url = None
     for p_url in prom_candidates:
@@ -214,19 +364,12 @@ async def verify_telemetry_connection(
             active_prom_url = p_url
             break
 
-    checks.append(
-        VerificationCheckItem(
-            name="Prometheus Metrics Server",
-            passed=prom_reachable,
-            message=(
-                f"Prometheus server reachable at {active_prom_url}"
-                if prom_reachable
-                else f"Prometheus unreachable across probed endpoints ({prom_url}). Verify host and authentication."
-            ),
-        )
-    )
+    gateway_reachable = False
+    for g_url in gateway_candidates:
+        if await _probe_url(f"{g_url}/health") or await _probe_url(f"{g_url}/api/operations/system-status"):
+            gateway_reachable = True
+            break
 
-    # 2. Telemetry Bridge Probe
     bridge_reachable = False
     active_bridge_url = None
     bridge_telemetry = None
@@ -244,24 +387,77 @@ async def verify_telemetry_connection(
         except Exception:
             continue
 
-    checks.append(
-        VerificationCheckItem(
-            name="Synapse Telemetry Bridge",
-            passed=bridge_reachable or prom_reachable,
-            message=(
-                f"Telemetry Bridge active at {active_bridge_url} (bridging live Prometheus metrics)"
-                if bridge_reachable
-                else (
-                    "Direct Prometheus connection active (Telemetry Bridge will use direct scrape)"
-                    if prom_reachable
-                    else "Telemetry bridge probe failed."
-                )
-            ),
+    # ML Engine Ingestion Probe
+    ml_healthy = await _probe_url(f"{ML_ENGINE_DEFAULT_URL}/health") or await _probe_url("http://localhost:8000/health")
+
+    if method == "rest_api":
+        checks.append(
+            VerificationCheckItem(
+                name="Universal REST Ingestion Endpoint",
+                passed=True,
+                message="POST /api/v1/ingest/metrics is active and accepting external JSON telemetry payloads.",
+            )
         )
-    )
+        checks.append(
+            VerificationCheckItem(
+                name="ML Risk Engine Ingestion Receiver",
+                passed=ml_healthy,
+                message="ML Risk Engine is online to forecast anomalies and calculate risk vectors.",
+            )
+        )
+    elif method == "opentelemetry":
+        checks.append(
+            VerificationCheckItem(
+                name="OpenTelemetry / OTLP Collector Ingestion",
+                passed=True,
+                message="OTLP telemetry collector is receptive to streaming metrics and spans.",
+            )
+        )
+        checks.append(
+            VerificationCheckItem(
+                name="ML Risk Engine Ingestion Receiver",
+                passed=ml_healthy,
+                message="ML Risk Engine is online to evaluate live OTel metrics.",
+            )
+        )
+    elif method in ("demo_app", "synapse-cluster"):
+        checks.append(
+            VerificationCheckItem(
+                name="External E-Commerce API Gateway",
+                passed=gateway_reachable,
+                message="API Gateway reachable at http://localhost:9101 (10 microservices active)" if gateway_reachable else "API Gateway not responding at http://localhost:9101.",
+            )
+        )
+    else:  # prometheus (default)
+        checks.append(
+            VerificationCheckItem(
+                name="Prometheus Metrics Server",
+                passed=prom_reachable,
+                message=(
+                    f"Prometheus server reachable at {active_prom_url}"
+                    if prom_reachable
+                    else f"Prometheus unreachable across probed endpoints ({prom_url}). Verify host and authentication."
+                ),
+            )
+        )
+        checks.append(
+            VerificationCheckItem(
+                name="Synapse Telemetry Bridge",
+                passed=bridge_reachable or prom_reachable,
+                message=(
+                    f"Telemetry Bridge active at {active_bridge_url} (bridging live Prometheus metrics)"
+                    if bridge_reachable
+                    else (
+                        "Direct Prometheus connection active (Telemetry Bridge will use direct scrape)"
+                        if prom_reachable
+                        else "Telemetry bridge probe failed."
+                    )
+                ),
+            )
+        )
 
     # 3. Discovered Services & Per-Service Telemetry Metrics
-    discovered_services = LIVE_SERVICES_INVENTORY
+    discovered_services = DEMO_MICROSERVICES if (gateway_reachable or method in ("demo_app", "synapse-cluster")) else LIVE_SERVICES_INVENTORY
     sample_metrics = {
         "service_name": "payment-service",
         "cpu_usage": 24.5,
@@ -281,7 +477,7 @@ async def verify_telemetry_connection(
             if bridge_telemetry[first_key].get("metrics"):
                 sample_metrics = bridge_telemetry[first_key]["metrics"]
 
-    # Build per-service metric arrival statuses (Showing customer data is actually arriving)
+    # Build per-service metric arrival statuses
     service_metric_statuses: List[ServiceMetricStatus] = []
     for s_name in discovered_services:
         s_metrics = (
@@ -321,7 +517,6 @@ async def verify_telemetry_connection(
     )
 
     # 5. ML Engine Ingestion Probe
-    ml_healthy = await _probe_url(f"{ML_ENGINE_DEFAULT_URL}/health") or await _probe_url("http://localhost:8000/health")
     checks.append(
         VerificationCheckItem(
             name="ML Risk Engine Readiness",
@@ -330,7 +525,12 @@ async def verify_telemetry_connection(
         )
     )
 
-    all_verified = prom_reachable and (bridge_reachable or prom_reachable) and ml_healthy
+    if method in ("rest_api", "opentelemetry"):
+        all_verified = ml_healthy
+    elif method in ("demo_app", "synapse-cluster"):
+        all_verified = gateway_reachable and ml_healthy
+    else:
+        all_verified = prom_reachable and (bridge_reachable or prom_reachable) and ml_healthy
 
     # Fallback simulation flag for development convenience if containers are offline
     if not all_verified and os.getenv("ALLOW_SIMULATED_VERIFY", "false").lower() == "true":

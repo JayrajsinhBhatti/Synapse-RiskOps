@@ -1122,8 +1122,9 @@ service:
                   size="md"
                   onClick={handleVerifyConnection}
                   disabled={isVerifying}
+                  isLoading={isVerifying}
                   icon={RefreshCw}
-                  className={`text-xs font-bold shadow-md shadow-cyan-500/20 ${isVerifying ? 'animate-spin' : ''}`}
+                  className="text-xs font-bold shadow-md shadow-cyan-500/20"
                 >
                   {isVerifying ? 'Probing & Connecting...' : 'Test Connection & Receive Telemetry'}
                 </Button>

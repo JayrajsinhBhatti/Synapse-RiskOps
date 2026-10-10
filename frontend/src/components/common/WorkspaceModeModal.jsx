@@ -41,8 +41,9 @@ import {
 import Button from './Button';
 
 export default function WorkspaceModeModal() {
-  const { mode, isDemoMode, isConnectedMode, switchMode, isModeModalOpen, closeModeModal, isSwitching } =
+  const { mode, isDemoMode, isConnectedMode, switchMode, isModeModalOpen, closeModeModal, isSwitching, openConnectModal } =
     useWorkspace();
+
 
   const [targetMode, setTargetMode] = useState(mode);
   
@@ -284,6 +285,29 @@ public class MetricSender {
           {/* Connected Mode Configuration Details */}
           {targetMode === 'connected' && (
             <div className="space-y-4 animate-in fade-in duration-200">
+              {/* Option to Connect Live Demo Microservices */}
+              <div className="p-4 rounded-2xl border border-cyan-500/30 dark:bg-cyan-500/10 bg-cyan-50/70 flex items-center justify-between">
+                <div>
+                  <h5 className="text-xs font-bold dark:text-white text-slate-900 flex items-center gap-1.5">
+                    <Radio className="w-4 h-4 text-cyan-500" />
+                    Live E-Commerce Demo Platform (10 Microservices)
+                  </h5>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    One-click admin setup to connect or disconnect the running 10 microservices on ports 9100–9110.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeModeModal();
+                    openConnectModal();
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-500 text-white hover:bg-cyan-600 transition-colors shadow-sm shrink-0"
+                >
+                  Manage Connection
+                </button>
+              </div>
+
               {/* Question */}
               <div className="border-b dark:border-white/10 border-slate-200 pb-3">
                 <h4 className="text-sm font-extrabold dark:text-white text-slate-900">
@@ -293,6 +317,7 @@ public class MetricSender {
                   Choose your monitoring infrastructure or ingest metrics directly into the pipeline.
                 </p>
               </div>
+
 
               {/* Source Option Pills */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">

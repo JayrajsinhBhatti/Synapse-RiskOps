@@ -67,10 +67,25 @@ async def get_reliability_metrics(
     inc_result = await db.execute(inc_query)
     all_incidents = inc_result.scalars().all()
 
-    # 2. Fetch services
-    svc_result = await db.execute(select(Service).where(Service.is_active == True))
-    all_services = svc_result.scalars().all()
-    services_count = len(all_services) or 12
+    # 2. Fetch services scoped to operational mode
+    from app.models.retention import WorkspaceSetting
+    setting_res = await db.execute(
+        select(WorkspaceSetting).where(WorkspaceSetting.key == "system_mode")
+    )
+    setting = setting_res.scalar_one_or_none()
+    is_ext_connected = bool(setting and isinstance(setting.value, dict) and setting.value.get("external_app_connected"))
+    active_svcs = setting.value.get("config", {}).get("services") if (setting and is_ext_connected) else None
+
+    if is_ext_connected and active_svcs:
+        svc_result = await db.execute(
+            select(Service).where(Service.is_active == True, Service.service_name.in_(active_svcs))
+        )
+        all_services = svc_result.scalars().all()
+    else:
+        svc_result = await db.execute(select(Service).where(Service.is_active == True))
+        all_services = svc_result.scalars().all()
+
+    services_count = len(all_services)
 
     now = datetime.now(timezone.utc)
 

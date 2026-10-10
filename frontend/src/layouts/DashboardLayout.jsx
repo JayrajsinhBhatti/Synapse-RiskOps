@@ -20,7 +20,9 @@ import ChatWidget from '../components/chatbot/ChatWidget';
 import GlobalSearchModal from '../components/common/GlobalSearchModal';
 import NotificationPreferencesModal from '../components/common/NotificationPreferencesModal';
 import WorkspaceModeModal from '../components/common/WorkspaceModeModal';
+import ConnectWebsiteModal from '../components/common/ConnectWebsiteModal';
 import {
+  Globe,
   Shield,
   Activity,
   Zap,
@@ -85,7 +87,7 @@ const ALL_NAV_ITEMS = NAV_SECTIONS.flatMap((s) => s.items);
 
 export default function DashboardLayout({ activeView, onViewChange, onLogout, children }) {
   const { user, isAuthenticated, role, logout, openAuthModal } = useAuth();
-  const { mode, isDemoMode, openModeModal } = useWorkspace();
+  const { mode, isDemoMode, externalAppConnected, openModeModal, openConnectModal } = useWorkspace();
   const { isConnected, status: sseStatus } = useSSE();
   const { toggleTheme, isDark } = useTheme();
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
@@ -286,6 +288,39 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
                   </>
                 )}
               </button>
+
+              {/* External Website Connection Button */}
+              <button
+                type="button"
+                onClick={openConnectModal}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-mono font-bold transition-all shadow-sm ${
+                  externalAppConnected
+                    ? 'dark:bg-cyan-500/15 bg-cyan-50 hover:bg-cyan-100 dark:hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-700 dark:text-cyan-400'
+                    : 'dark:bg-slate-800/80 bg-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                }`}
+                title="Click to view external application status, probe services, or connect/disconnect"
+              >
+                {externalAppConnected ? (
+                  <>
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
+                    </span>
+                    <span>10 SERVICES LIVE</span>
+                    <span className="text-[9px] uppercase tracking-wider bg-cyan-500/20 px-1 py-0.5 rounded border border-cyan-500/30 text-cyan-600 dark:text-cyan-300">
+                      Website
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Globe className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span>CONNECT WEBSITE</span>
+                    <span className="text-[9px] uppercase tracking-wider bg-indigo-500/10 px-1 py-0.5 rounded border border-indigo-500/20 text-indigo-600 dark:text-indigo-300">
+                      Admin
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Right: Actions, Search, Notifications & User Profile */}
@@ -401,6 +436,7 @@ export default function DashboardLayout({ activeView, onViewChange, onLogout, ch
         onClose={() => setIsNotificationsModalOpen(false)}
       />
       <WorkspaceModeModal />
+      <ConnectWebsiteModal />
 
       {/* Jayraj's Ops Chatbot Co-Pilot Widget */}
       <ChatWidget />

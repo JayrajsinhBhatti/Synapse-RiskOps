@@ -142,6 +142,51 @@ async def _async_test_verify_connection():
         assert "timestamp" in data
 
 
+async def _async_test_connect_demo_app_rbac():
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        admin_headers = await get_real_auth_headers(client)
+
+        # 1. Disconnect succeeds unconditionally for Admin
+        disc_res = await client.post(
+            "/api/system/connect-demo-app",
+            json={"action": "disconnect"},
+            headers=admin_headers,
+        )
+        assert disc_res.status_code == 200
+        assert disc_res.json()["mode"] == "demo"
+        assert disc_res.json()["external_app_connected"] is False
+
+        # 2. Connect requires reachable gateway or returns informative 400
+        conn_res = await client.post(
+            "/api/system/connect-demo-app",
+            json={"action": "connect", "gateway_url": "http://localhost:9101"},
+            headers=admin_headers,
+        )
+        assert conn_res.status_code in (200, 400)
+        if conn_res.status_code == 200:
+            assert conn_res.json()["success"] is True
+            assert conn_res.json()["external_app_connected"] is True
+            assert len(conn_res.json()["services"]) == 10
+        else:
+            assert "Could not reach external demo application" in conn_res.json()["detail"]
+
+        # 3. Verify non-admin role rejection (403 Forbidden)
+        viewer_login = await client.post(
+            "/api/auth/login",
+            json={"username": "operator", "password": "operator123"},
+        )
+        if viewer_login.status_code == 200:
+            v_token = viewer_login.json()["access_token"]
+            v_headers = {"Authorization": f"Bearer {v_token}", "Content-Type": "application/json"}
+            forbidden_res = await client.post(
+                "/api/system/connect-demo-app",
+                json={"action": "connect"},
+                headers=v_headers,
+            )
+            assert forbidden_res.status_code == 403
+
+
 def test_system_mode_flow():
     asyncio.run(_async_test_system_mode_flow())
 
@@ -154,8 +199,14 @@ def test_verify_connection():
     asyncio.run(_async_test_verify_connection())
 
 
+def test_connect_demo_app_rbac():
+    asyncio.run(_async_test_connect_demo_app_rbac())
+
+
 if __name__ == "__main__":
     test_system_mode_flow()
     test_mode_isolation()
     test_verify_connection()
+    test_connect_demo_app_rbac()
     print("All system mode and connection verification tests passed!")
+

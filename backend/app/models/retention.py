@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Integer,
     String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
@@ -60,3 +61,31 @@ class WorkspaceSetting(Base):
 
     def __repr__(self) -> str:
         return f"<WorkspaceSetting(key='{self.key}')>"
+
+
+class AdminAuditLog(Base):
+    """
+    Immutable audit trail for sensitive administrative operations,
+    including manual operational log clearances and retention adjustments.
+    """
+
+    __tablename__ = "admin_audit_logs"
+
+    id = Column(
+        String(50),
+        primary_key=True,
+    )
+    action = Column(String(100), nullable=False)
+    scope = Column(String(100), nullable=False)
+    reason = Column(Text, nullable=False)
+    records_affected = Column(Integer, default=0, nullable=False)
+    performed_by = Column(String(100), nullable=False)
+    performed_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    metadata_json = Column(JSONB, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AdminAuditLog(action='{self.action}', by='{self.performed_by}', affected={self.records_affected})>"

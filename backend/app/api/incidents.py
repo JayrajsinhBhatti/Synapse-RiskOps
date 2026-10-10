@@ -192,12 +192,9 @@ async def list_incidents(
     if service_id:
         query = query.where(Incident.service_id == service_id)
 
-    # Operational mode filter
-    active_mode = mode
-    if not active_mode and request:
-        active_mode = request.headers.get("x-synapse-mode")
-    if active_mode:
-        query = query.where(Incident.data_mode == active_mode.lower())
+    # Operational mode filter (apply only when explicitly requested via query parameter)
+    if mode:
+        query = query.where(Incident.data_mode == mode.lower())
 
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
