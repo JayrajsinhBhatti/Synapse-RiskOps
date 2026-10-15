@@ -175,3 +175,86 @@ async def test_orchestrator_triggers_gmail_alert():
     assert call_payload["severity"] == "CRITICAL"
     assert call_payload["failure_type"] == "database_connection_exhaustion"
     assert call_payload["risk_score"] == 88.0
+
+
+@pytest.mark.asyncio
+async def test_email_dispatch_multiple_recipients():
+    """Verify comma-separated recipients are cleanly parsed and passed to sendmail."""
+    service = EmailService(
+        sender_email="spareid9687@gmail.com",
+        sender_password="abcd-efgh-ijkl-mnop",
+        admin_email="chauhankavya761@gmail.com, spareid9687@gmail.com",
+    )
+
+    mock_smtp_instance = MagicMock()
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance):
+        res = await service.send_incident_alert({
+            "service_name": "cart-service",
+            "incident_id": "INC-MULTI-REC",
+            "risk_score": 80.0,
+            "severity": "HIGH",
+        })
+
+        assert res["success"] is True
+        assert res["status"] == "SENT"
+        assert "chauhankavya761@gmail.com" in res["recipient"]
+        assert "spareid9687@gmail.com" in res["recipient"]
+
+        # sendmail must receive list of recipient strings, not a single comma string
+        recipients_arg = mock_smtp_instance.sendmail.call_args[0][1]
+        assert isinstance(recipients_arg, list)
+        assert len(recipients_arg) == 2
+        assert "chauhankavya761@gmail.com" in recipients_arg
+        assert "spareid9687@gmail.com" in recipients_arg
+
+
+@pytest.mark.asyncio
+async def test_email_cooldown_debouncing():
+    """Verify rapid repeated alerts for the same service are debounced to protect SMTP limits."""
+    service = EmailService(
+        sender_email="spareid9687@gmail.com",
+        sender_password="abcd-efgh-ijkl-mnop",
+        admin_email="chauhankavya761@gmail.com",
+    )
+
+    mock_smtp_instance = MagicMock()
+    with patch("smtplib.SMTP", return_value=mock_smtp_instance):
+        # First alert: sent immediately
+        res1 = await service.send_incident_alert({
+            "service_name": "inventory-service",
+            "incident_id": "INC-01",
+            "risk_score": 85.0,
+            "severity": "CRITICAL",
+        })
+        assert res1["status"] == "SENT"
+
+        # Immediate second alert for same service: debounced
+        res2 = await service.send_incident_alert({
+            "service_name": "inventory-service",
+            "incident_id": "INC-01",
+            "risk_score": 86.0,
+            "severity": "CRITICAL",
+        })
+        assert res2["status"] == "DEBOUNCED"
+
+        # Forced alert (e.g. user chaos inject): sent despite cooldown
+        res3 = await service.send_incident_alert(
+            {
+                "service_name": "inventory-service",
+                "incident_id": "INC-01",
+                "risk_score": 86.0,
+                "severity": "CRITICAL",
+            },
+            force=True,
+        )
+        assert res3["status"] == "SENT"
+
+        # Resolution alert: sent immediately
+        res4 = await service.send_incident_alert({
+            "service_name": "inventory-service",
+            "incident_id": "INC-01",
+            "status": "RESOLVED",
+            "risk_score": 20.0,
+            "severity": "HEALTHY",
+        })
+        assert res4["status"] == "SENT"

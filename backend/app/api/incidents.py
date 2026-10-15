@@ -151,9 +151,9 @@ async def create_incident(
             "guidance": incident.description or "Incident logged. Immediate triage recommended.",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        asyncio.create_task(email_service.send_incident_alert(email_payload))
+        email_service.send_incident_alert_bg(email_payload, force=True)
     except Exception as e:
-        pass
+        logger.warning(f"Failed to dispatch incident alert email: {e}")
 
     return incident
 

@@ -64,9 +64,9 @@ class Settings(BaseSettings):
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = "spareid9687@gmail.com"
-    SMTP_PASSWORD: str = ""
-    GMAIL_APP_PASSWORD: str = ""
-    ADMIN_EMAIL: str = "jayrajsinhbhatti9687@gmail.com"
+    SMTP_PASSWORD: str = "dcaq wgxg ayxs cmqk"
+    GMAIL_APP_PASSWORD: str = "dcaq wgxg ayxs cmqk"
+    ADMIN_EMAIL: str = "chauhankavya761@gmail.com"
     SMTP_USE_TLS: bool = True
     EMAIL_NOTIFICATIONS_ENABLED: bool = True
 

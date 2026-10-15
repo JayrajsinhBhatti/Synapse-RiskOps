@@ -74,10 +74,10 @@ class OrchestrationService:
             logger.warning(f"n8n webhook dispatch failed (non-fatal): {e}")
         return False
 
-    async def _send_incident_email(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _send_incident_email(self, payload: Dict[str, Any], force: bool = True) -> Dict[str, Any]:
         """Forward incident predictive failure alert to admin via Gmail SMTP."""
         try:
-            return await email_service.send_incident_alert(payload)
+            return await email_service.send_incident_alert(payload, force=force)
         except Exception as e:
             logger.warning(f"Gmail SMTP alert dispatch failed (non-fatal): {e}")
             return {"success": False, "status": "ERROR", "detail": str(e)}
@@ -386,6 +386,28 @@ class OrchestrationService:
                 }
                 await self._send_n8n_incident(recovery_payload)
 
+                # Dispatch resolution notification via Gmail SMTP
+                try:
+                    email_service.send_incident_alert_bg({
+                        "incident_id": str(existing_incident.id),
+                        "service_name": service_name,
+                        "severity": "HEALTHY",
+                        "risk_score": round(risk_score, 2),
+                        "failure_type": failure_type,
+                        "ml_confidence": round(ml_conf, 4),
+                        "rca_confidence": round(rca_conf, 4),
+                        "root_cause": service_name,
+                        "affected_services": [service_name],
+                        "routing_decision": "recovered",
+                        "timestamp": now.isoformat(),
+                        "guidance": f"Service {service_name} metrics have stabilized back within safe operational limits. Incident resolved.",
+                        "metrics": metrics,
+                        "status": "RESOLVED",
+                        "is_auto_fixed": True,
+                    }, force=True)
+                except Exception as rec_err:
+                    logger.debug(f"Recovery email dispatch notice: {rec_err}")
+
                 incident_id = existing_incident.id
                 incident_status = "RESOLVED"
                 decision = "escalate"
@@ -501,25 +523,28 @@ class OrchestrationService:
 
                 # Dispatch predictive failure alert to admin via Gmail SMTP
                 is_crit_svc = (risk_score > 74.0)
-                asyncio.create_task(self._send_incident_email({
-                    "incident_id": str(existing_incident.id),
-                    "service_name": service_name,
-                    "severity": severity,
-                    "risk_score": round(risk_score, 2),
-                    "failure_type": failure_type,
-                    "ml_confidence": round(ml_conf, 4),
-                    "rca_confidence": round(rca_conf, 4),
-                    "root_cause": service_name,
-                    "affected_services": [service_name],
-                    "routing_decision": routing_decision_str,
-                    "timestamp": now.isoformat(),
-                    "guidance": f"Elevated fault observed on {service_name}. Human intervention required." if is_crit_svc else f"Autonomous remediation executed for {service_name}.",
-                    "metrics": metrics,
-                    "status": incident_status,
-                    "is_auto_fixed": (risk_score <= 74.0 and auto_executed),
-                    "proposed_action": proposed_action,
-                    "is_critical": is_crit_svc,
-                }))
+                try:
+                    email_service.send_incident_alert_bg({
+                        "incident_id": str(existing_incident.id),
+                        "service_name": service_name,
+                        "severity": severity,
+                        "risk_score": round(risk_score, 2),
+                        "failure_type": failure_type,
+                        "ml_confidence": round(ml_conf, 4),
+                        "rca_confidence": round(rca_conf, 4),
+                        "root_cause": service_name,
+                        "affected_services": [service_name],
+                        "routing_decision": routing_decision_str,
+                        "timestamp": now.isoformat(),
+                        "guidance": f"Elevated fault observed on {service_name}. Human intervention required." if is_crit_svc else f"Autonomous remediation executed for {service_name}.",
+                        "metrics": metrics,
+                        "status": incident_status,
+                        "is_auto_fixed": (risk_score <= 74.0 and auto_executed),
+                        "proposed_action": proposed_action,
+                        "is_critical": is_crit_svc,
+                    })
+                except Exception as e_mail:
+                    logger.debug(f"Debounce incident email notice: {e_mail}")
                 incident_id = existing_incident.id
                 routing_block = self._evaluate_confidence_router(ml_conf, rca_conf, service_name=service_name, risk_score=risk_score)
                 decision = routing_decision_str

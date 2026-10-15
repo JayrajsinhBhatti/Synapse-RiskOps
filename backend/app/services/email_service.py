@@ -13,15 +13,19 @@ import logging
 import os
 import smtplib
 import ssl
+import time
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set, Union
 
 from app.core.config import settings
 
 logger = logging.getLogger("synapse.email")
+
+# Strong reference tracker for background email tasks to prevent premature GC
+_active_email_tasks: Set[asyncio.Task] = set()
 
 
 class EmailService:
@@ -44,6 +48,8 @@ class EmailService:
         self._admin_email = admin_email
         self._use_tls = use_tls
         self._enabled = enabled
+        self._recent_alerts: Dict[str, float] = {}
+        self.COOLDOWN_SECONDS: float = 30.0
 
     @property
     def smtp_host(self) -> str:
@@ -84,7 +90,7 @@ class EmailService:
         return (
             getattr(settings, "ADMIN_EMAIL", None)
             or os.getenv("ADMIN_EMAIL")
-            or "jayrajsinhbhatti9687@gmail.com"
+            or "chauhankavya761@gmail.com"
         )
 
     @property
@@ -381,9 +387,22 @@ Sent via Gmail SMTP ({self.sender_email}) to Admin ({self.admin_email}).
                 "detail": msg,
             }
 
+        # Parse recipient list cleanly
+        if isinstance(to_email, str):
+            recipients = [r.strip() for r in to_email.split(",") if r.strip()]
+        elif isinstance(to_email, (list, tuple, set)):
+            recipients = [str(r).strip() for r in to_email if str(r).strip()]
+        else:
+            recipients = [str(to_email).strip()]
+
+        if not recipients:
+            recipients = [self.admin_email]
+
+        recipient_str = ", ".join(recipients)
+
         msg = MIMEMultipart("alternative")
         msg["From"] = f"Synapse RiskOps Alerting <{self.sender_email}>"
-        msg["To"] = to_email
+        msg["To"] = recipient_str
         msg["Subject"] = subject
         msg["Date"] = formatdate(localtime=True)
         msg["Message-ID"] = make_msgid(domain="synapse-riskops.local")
@@ -393,7 +412,7 @@ Sent via Gmail SMTP ({self.sender_email}) to Admin ({self.admin_email}).
         msg.attach(MIMEText(html_content, "html", "utf-8"))
 
         try:
-            logger.info(f"Connecting to Gmail SMTP server {self.smtp_host}:{self.smtp_port} for {self.sender_email} -> {to_email}...")
+            logger.info(f"Connecting to Gmail SMTP server {self.smtp_host}:{self.smtp_port} for {self.sender_email} -> {recipient_str}...")
             context = ssl.create_default_context()
             if self.smtp_port == 465:
                 server = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=12.0, context=context)
@@ -406,14 +425,14 @@ Sent via Gmail SMTP ({self.sender_email}) to Admin ({self.admin_email}).
                     server.ehlo()
 
             server.login(self.sender_email, password)
-            server.sendmail(self.sender_email, [to_email], msg.as_string())
+            server.sendmail(self.sender_email, recipients, msg.as_string())
             server.quit()
 
-            logger.info(f"Successfully delivered incident alert email to admin ({to_email}) via Gmail SMTP.")
+            logger.info(f"Successfully delivered incident alert email to admin ({recipient_str}) via Gmail SMTP.")
             return {
                 "success": True,
                 "status": "SENT",
-                "recipient": to_email,
+                "recipient": recipient_str,
                 "sender": self.sender_email,
                 "subject": subject,
                 "detail": "Email successfully delivered via Gmail SMTP.",
@@ -485,6 +504,7 @@ Sent via Gmail SMTP ({self.sender_email}) to Admin ({self.admin_email}).
         self,
         incident_data: Dict[str, Any],
         recipient: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """
         Send a formatted predictive failure incident alert email to the admin.
@@ -493,12 +513,37 @@ Sent via Gmail SMTP ({self.sender_email}) to Admin ({self.admin_email}).
             incident_data: Dictionary containing service_name, incident_id, risk_score,
                            severity, failure_type, root_cause, guidance, metrics, etc.
             recipient: Optional override recipient (defaults to admin_email).
+            force: If True, bypasses cooldown debouncing (e.g. for explicit user chaos injection).
         """
         service_name = incident_data.get("service_name", "Unknown Service")
         severity = incident_data.get("severity", "CRITICAL").upper()
         risk_score = float(incident_data.get("risk_score", 0.0))
         failure_type = str(incident_data.get("failure_type", "latency_degradation")).replace("_", " ").title()
-        is_auto_fixed = bool(incident_data.get("is_auto_fixed", False)) or (incident_data.get("status") == "RESOLVED") or ("auto" in str(incident_data.get("routing_decision", "")).lower())
+        status_val = incident_data.get("status", "OPEN")
+        is_auto_fixed = bool(incident_data.get("is_auto_fixed", False)) or (status_val == "RESOLVED") or ("auto" in str(incident_data.get("routing_decision", "")).lower())
+
+        target_recipient = recipient or self.admin_email
+
+        # Debounce repeated alert spam per service to avoid Gmail SMTP 421/454 throttling
+        now_ts = time.time()
+        last_sent = self._recent_alerts.get(service_name, 0.0)
+        cooldown_active = (now_ts - last_sent) < self.COOLDOWN_SECONDS
+
+        if not force and not is_auto_fixed and status_val != "RESOLVED" and cooldown_active:
+            logger.info(
+                f"Email alert for '{service_name}' skipped (cooldown active: {now_ts - last_sent:.1f}s < {self.COOLDOWN_SECONDS}s)."
+            )
+            return {
+                "success": True,
+                "status": "DEBOUNCED",
+                "recipient": target_recipient,
+                "sender": self.sender_email,
+                "subject": f"[DEBOUNCED] {service_name}",
+                "detail": f"Incident alert debounced to protect Gmail SMTP rate limits ({self.COOLDOWN_SECONDS}s window).",
+            }
+
+        # Update last sent timestamp for service
+        self._recent_alerts[service_name] = now_ts
 
         if is_auto_fixed:
             subject = f"✅ [AUTO-RESOLVED] Synapse RiskOps: {failure_type} on {service_name} was detected and is fixed"
@@ -507,13 +552,44 @@ Sent via Gmail SMTP ({self.sender_email}) to Admin ({self.admin_email}).
         html_content = self._build_incident_html(incident_data)
         text_content = self._build_incident_text(incident_data)
 
-        target_recipient = recipient or self.admin_email
         return await self.send_email(
             to_email=target_recipient,
             subject=subject,
             html_content=html_content,
             text_content=text_content,
         )
+
+    def send_incident_alert_bg(
+        self,
+        incident_data: Dict[str, Any],
+        recipient: Optional[str] = None,
+        force: bool = False,
+    ) -> asyncio.Task:
+        """
+        Dispatches send_incident_alert in a strongly-referenced background task.
+        Guarantees that Python asyncio garbage collection will NOT discard
+        the coroutine before SMTP network completion.
+        """
+        task = asyncio.create_task(
+            self.send_incident_alert(incident_data, recipient=recipient, force=force)
+        )
+        _active_email_tasks.add(task)
+
+        def _on_done(t: asyncio.Task) -> None:
+            _active_email_tasks.discard(t)
+            try:
+                res = t.result()
+                if isinstance(res, dict) and res.get("success"):
+                    logger.info(
+                        f"Background email delivered successfully: {res.get('status')} -> {res.get('recipient')}"
+                    )
+                else:
+                    logger.warning(f"Background email completed with notice: {res}")
+            except Exception as exc:
+                logger.error(f"Background email task failed with exception: {exc}", exc_info=True)
+
+        task.add_done_callback(_on_done)
+        return task
 
     async def send_test_email(self, to_email: Optional[str] = None) -> Dict[str, Any]:
         """Send a test verification email to confirm Gmail SMTP integration."""

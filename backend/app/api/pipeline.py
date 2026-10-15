@@ -26,6 +26,7 @@ from app.schemas.orchestration import (
 from app.models.autonomy import RemediationRecord
 from app.services.ansible_service import ansible_service
 from app.services.autonomy_budget import autonomy_budget_engine
+from app.services.email_service import email_service
 from app.services.orchestrator import orchestrator
 from app.services.sse_manager import sse_manager
 
@@ -116,6 +117,27 @@ async def execute_remediation(
         )
 
     await db.refresh(incident)
+
+    # Dispatch resolution notification via Gmail SMTP
+    try:
+        email_payload = {
+            "incident_id": str(incident.id),
+            "service_name": target,
+            "failure_type": incident.predicted_failure_type or "system_fault",
+            "severity": "HEALTHY",
+            "risk_score": 25.0,
+            "ml_confidence": 0.95,
+            "rca_confidence": 0.95,
+            "root_cause": target,
+            "guidance": f"Remediation action '{action_desc}' executed successfully on {target}. Incident marked as RESOLVED.",
+            "routing_decision": "remediated",
+            "status": "RESOLVED",
+            "is_auto_fixed": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        email_service.send_incident_alert_bg(email_payload, force=True)
+    except Exception as em_err:
+        pass
 
     return {
         "incident_id": str(incident.id),

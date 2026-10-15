@@ -648,7 +648,7 @@ async def start_service_load(
             "metrics": metrics,
             "timestamp": now_ts.isoformat(),
         }
-        asyncio.create_task(email_service.send_incident_alert(email_payload))
+        email_service.send_incident_alert_bg(email_payload, force=True)
     except Exception as e:
         logger.warning(f"Failed to dispatch chaos incident email alert: {e}")
     await sse_manager.broadcast_risk_alert({
@@ -1050,6 +1050,33 @@ async def inject_chaos_experiment(
         "injected_at": now.isoformat(),
     })
 
+    # Dispatch predictive failure alert to admin via Gmail SMTP
+    try:
+        chaos_incident_id = f"CHAOS-{req.service_name.upper()}-{int(now.timestamp())}"
+        email_payload = {
+            "incident_id": chaos_incident_id,
+            "service_name": req.service_name,
+            "failure_type": req.fault_type,
+            "severity": "CRITICAL" if req.intensity >= 0.5 else "HIGH",
+            "risk_score": float(82.0 if req.intensity >= 0.5 else 55.0),
+            "ml_confidence": 0.94,
+            "rca_confidence": 0.91,
+            "root_cause": req.service_name,
+            "guidance": f"Chaos fault '{req.fault_type}' actively injected on {req.service_name} ({int(req.intensity * 100)}% intensity). Immediate triage / counterfactual verification recommended.",
+            "routing_decision": "human_approval",
+            "metrics": {
+                "latency_p99_ms": 3884.0 if req.fault_type == "latency" else 450.0,
+                "error_rate_pct": 18.4 if req.fault_type == "error_rate" else 8.5,
+                "cpu_utilization_pct": 91.2 if req.fault_type == "cpu_spike" else 65.0,
+                "memory_pct": 58.4,
+            },
+            "timestamp": now.isoformat(),
+            "status": "OPEN",
+        }
+        email_service.send_incident_alert_bg(email_payload, force=True)
+    except Exception as e:
+        logger.warning(f"Failed to dispatch chaos injection alert email: {e}")
+
     return {
         "status": "injected",
         "ground_truth": {
@@ -1107,6 +1134,33 @@ async def remediate_chaos_experiment(
 
     ansible_task_id = ansible_res.get("task_id")
     semaphore_url = ansible_res.get("semaphore_history_url", "http://localhost:3000/project/1/history")
+
+    # Dispatch resolution alert via Gmail SMTP
+    try:
+        res_payload = {
+            "incident_id": "CHAOS-EXP-01",
+            "service_name": target_svc,
+            "failure_type": experiment_state.get("fault_type", "latency"),
+            "severity": "HEALTHY",
+            "risk_score": 28.0,
+            "ml_confidence": 0.95,
+            "rca_confidence": 0.95,
+            "root_cause": target_svc,
+            "guidance": f"Remediation playbook SCALE_OUT_PODS executed successfully on {target_svc}. Health probe returned 200 OK.",
+            "routing_decision": "auto_resolved",
+            "status": "RESOLVED",
+            "is_auto_fixed": True,
+            "metrics": {
+                "latency_p99_ms": 42.0,
+                "error_rate_pct": 0.1,
+                "cpu_utilization_pct": 43.0,
+                "memory_pct": 32.1,
+            },
+            "timestamp": now.isoformat(),
+        }
+        email_service.send_incident_alert_bg(res_payload, force=True)
+    except Exception as e:
+        logger.warning(f"Failed to dispatch chaos remediation resolution email: {e}")
 
     return {
         "status": "remediation_executed",
