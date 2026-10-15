@@ -31,6 +31,15 @@ from app.schemas.orchestration import (
     UnifiedIncidentRecordResponse,
 )
 
+from app.schemas.dry_run import (
+    CandidateActionSimulation,
+    DryRunExecuteRequest,
+    DryRunExecuteResponse,
+    DryRunSimulateRequest,
+    DryRunSimulationResponse,
+    SecondaryFailureRisk,
+)
+
 __all__ = [
     "LoginRequest",
     "TokenResponse",
@@ -48,4 +57,10 @@ __all__ = [
     "AnomalyDiagnosisRequest",
     "RemediationExecutionRequest",
     "UnifiedIncidentRecordResponse",
+    "DryRunSimulateRequest",
+    "DryRunSimulationResponse",
+    "CandidateActionSimulation",
+    "SecondaryFailureRisk",
+    "DryRunExecuteRequest",
+    "DryRunExecuteResponse",
 ]

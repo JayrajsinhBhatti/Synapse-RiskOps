@@ -23,7 +23,9 @@ from app.schemas.orchestration import (
     RemediationExecutionRequest,
     UnifiedIncidentRecordResponse,
 )
+from app.models.autonomy import RemediationRecord
 from app.services.ansible_service import ansible_service
+from app.services.autonomy_budget import autonomy_budget_engine
 from app.services.orchestrator import orchestrator
 from app.services.sse_manager import sse_manager
 
@@ -73,7 +75,7 @@ async def trigger_diagnosis_and_route(
 async def execute_remediation(
     request: RemediationExecutionRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_or_system),
 ):
     """
     Executes a remediation action for an incident:
@@ -93,49 +95,27 @@ async def execute_remediation(
             detail="Incident not found",
         )
 
-    now = datetime.now(timezone.utc)
     action_desc = request.action or "SCALE_OUT_PODS"
     target = request.target or (incident.title.split("on ")[-1] if "on " in incident.title else "payment-service")
 
-    # 1. Trigger real Ansible Playbook via Semaphore API
-    ansible_result = await ansible_service.trigger_remediation_task(
-        action=action_desc,
-        service_name=target,
-        incident_id=str(incident.id),
-        failure_type=incident.predicted_failure_type or "latency_degradation",
-        risk_score=float(incident.risk_score or 85.0),
-        target_host=f"{target}.internal.cluster",
-    )
-
-    ansible_task_id = ansible_result.get("task_id")
-    semaphore_url = ansible_result.get("semaphore_history_url", "http://localhost:3000/project/1/history")
-
-    # 2. Update incident to RESOLVED
-    incident.status = "RESOLVED"
-    incident.resolved_at = now
-
-    # 3. Record detailed history with Semaphore reference
-    audit_note = (
-        f"Executed action '{action_desc}' on target '{target}'. "
-        f"Dispatched Ansible playbook via Semaphore (Task #{ansible_task_id or 'N/A'}). "
-        f"Logs available at: {semaphore_url}"
-    )
-
-    db.add(
-        IncidentHistory(
+    # 1. Trigger remediation with Autonomy Budget enforcement & tracking
+    try:
+        exec_res = await autonomy_budget_engine.execute_remediation_with_budget(
+            service_name=target,
+            action=action_desc,
             incident_id=incident.id,
-            action="MANUAL_OVERRIDE_REMEDIATED" if getattr(current_user, "role", "") != "SYSTEM" else "AUTO_REMEDIATED",
-            old_value="OPEN",
-            new_value=audit_note,
-            changed_by=getattr(current_user, "id", None),
+            remediation_record_id=None,
+            user=current_user,
+            db=db,
         )
-    )
+    except (PermissionError, ValueError) as err:
+        status_code = status.HTTP_403_FORBIDDEN if isinstance(err, PermissionError) else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(
+            status_code=status_code,
+            detail=str(err),
+        )
 
-    await db.flush()
     await db.refresh(incident)
-
-    # 4. Broadcast update over SSE
-    await sse_manager.broadcast_incident_updated(incident)
 
     return {
         "incident_id": str(incident.id),
@@ -143,9 +123,14 @@ async def execute_remediation(
         "resolved_at": incident.resolved_at.isoformat() if incident.resolved_at else None,
         "action_executed": action_desc,
         "target": target,
-        "ansible_task_id": ansible_task_id,
-        "semaphore_history_url": semaphore_url,
-        "ansible_status": ansible_result.get("status"),
+        "ansible_task_id": exec_res.get("ansible_task_id"),
+        "semaphore_history_url": exec_res.get("semaphore_history_url"),
+        "ansible_status": "LAUNCHED" if exec_res.get("ansible_task_id") else "SUCCESS",
+        "remediation_record_id": exec_res.get("remediation_record_id"),
+        "actual_execution_seconds": exec_res.get("actual_execution_seconds"),
+        "estimated_execution_seconds": exec_res.get("estimated_execution_seconds"),
+        "estimated_recovery_seconds": exec_res.get("estimated_recovery_seconds"),
+        "estimate_source": exec_res.get("estimate_source"),
     }
 
 
@@ -192,6 +177,24 @@ async def verify_recovery(
         changed_by=current_user.id,
     )
     db.add(history_entry)
+
+    # Autonomy Budget verification and feedback loop
+    rec_res = await db.execute(
+        select(RemediationRecord)
+        .where(RemediationRecord.incident_id == incident.id)
+        .order_by(RemediationRecord.created_at.desc())
+    )
+    latest_record = rec_res.scalars().first()
+    if latest_record:
+        await autonomy_budget_engine.verify_and_record_recovery(
+            record_id=latest_record.id,
+            current_metrics={
+                "error_rate": error_rate,
+                "latency_p99": p99_latency_ms,
+            },
+            db=db,
+        )
+
     await db.flush()
 
     # Broadcast update

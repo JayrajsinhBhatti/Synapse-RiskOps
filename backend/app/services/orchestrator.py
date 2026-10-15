@@ -12,6 +12,7 @@ Coordinates end-to-end incident lifecycle:
 6. Emits unified incident record aligning with shared/schemas/incident_record.schema.json
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -29,6 +30,7 @@ from app.models.service import Service, ServiceDependency
 from app.models.user import User
 from app.schemas.orchestration import UnifiedIncidentRecordResponse
 from app.services.ansible_service import ansible_service
+from app.services.autonomy_budget import autonomy_budget_engine
 from app.services.email_service import email_service
 from app.services.sse_manager import sse_manager
 
@@ -114,6 +116,15 @@ class OrchestrationService:
                 "risk_threshold": 75.0,
                 "model_name": "IsolationForest+Statsmodels",
                 "prediction_horizon_minutes": 15,
+                "conformal_interval": {
+                    "point_estimate": risk_score,
+                    "lower": None,
+                    "upper": None,
+                    "target_coverage": 0.90,
+                    "interval_width": None,
+                    "is_calibrated": False,
+                    "status": "uncalibrated_fallback",
+                },
             },
             "diagnosis": {
                 "rca_candidates": [
@@ -134,23 +145,30 @@ class OrchestrationService:
         self,
         ml_confidence: float,
         rca_confidence: float,
+        service_name: Optional[str] = None,
+        risk_score: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Person 1 Confidence Router Contract:
-        auto_remediate if ml_confidence >= 0.85 and rca_confidence >= 0.80
-        otherwise escalate
+        Confidence Router Contract + Autonomy Budget Policy Safeguards:
+        - If risk_score > 74.0: Mandate human approval (routing_decision = 'escalate')
+        - If risk_score <= 74.0: Cleared for auto_remediation
         """
         threshold = 0.85
         rca_threshold = 0.80
         is_auto = (ml_confidence >= threshold) and (rca_confidence >= rca_threshold)
 
+        is_high_risk = (risk_score is not None and risk_score > 74.0)
+        if is_high_risk:
+            is_auto = False
+
         return {
             "routing_decision": "auto_remediate" if is_auto else "escalate",
             "routing_confidence": round((ml_confidence + rca_confidence) / 2.0, 4),
             "routing_threshold_used": threshold,
-            "human_override": False,
-            "human_override_reason": None,
+            "human_override": is_high_risk,
+            "human_override_reason": "RISK_SCORE_ABOVE_74_HUMAN_IN_THE_LOOP_REQUIRED" if is_high_risk else None,
             "was_routing_correct": None,
+            "critical_service_safeguard": is_high_risk,
         }
 
     async def _execute_runbook_action(
@@ -371,7 +389,7 @@ class OrchestrationService:
                 incident_id = existing_incident.id
                 incident_status = "RESOLVED"
                 decision = "escalate"
-                routing_block = self._evaluate_confidence_router(ml_conf, rca_conf)
+                routing_block = self._evaluate_confidence_router(ml_conf, rca_conf, service_name=service_name)
                 automation_block = {"execution_status": "SKIPPED_RECOVERED", "actions_executed": []}
             else:
                 # DEBOUNCE: existing incident updated with latest observation, NO duplicate GenAI or n8n calls (Section 7.9)
@@ -380,29 +398,131 @@ class OrchestrationService:
                 existing_incident.confidence = Decimal(str(round(ml_conf, 4)))
                 existing_incident.anomaly_score = Decimal(str(round(risk_score / 100.0, 4)))
                 existing_incident.top_features = metrics
+                existing_incident.detected_at = now
+                existing_incident.updated_at = now
+                existing_incident.predicted_failure_type = failure_type
+                existing_incident.title = f"Incident: {failure_type.replace('_', ' ').title()} on {service_name}"
                 if db:
                     db.add(
                         IncidentHistory(
                             incident_id=existing_incident.id,
-                            action="OBSERVATION_UPDATED",
-                            old_value=None,
-                            new_value=f"Telemetry re-evaluation: risk_score={risk_score:.1f} ({severity}). Debounced: existing incident updated without re-invoking Gemini or duplicate n8n automation.",
+                            action="FAULT_ESCALATED",
+                            old_value=str(existing_incident.risk_score),
+                            new_value=f"Telemetry anomaly on {service_name}: {failure_type} (risk_score={risk_score:.1f}, severity={severity}).",
                             changed_by=user_db_id,
                         )
                     )
                     await db.flush()
+                runbook_block = ml_data.get("runbook", {})
+                proposed_action = runbook_block.get("recommended_action", "SCALE_OUT_PODS")
+                if proposed_action == "SCALE_SERVICE":
+                    proposed_action = "SCALE_OUT_PODS"
+
+                auto_executed = False
+                if risk_score <= 74.0:
+                    # RISK SCORE <= 74: Automatically executed with NO human intervention required!
+                    try:
+                        exec_res = await autonomy_budget_engine.execute_remediation_with_budget(
+                            service_name=service_name,
+                            action=proposed_action,
+                            incident_id=existing_incident.id,
+                            remediation_record_id=None,
+                            user=current_user,
+                            db=db,
+                            approval_notes="Autonomous auto-fix executed (risk <= 74).",
+                        )
+                        auto_executed = True
+                        incident_status = "RESOLVED"
+                        routing_decision_str = "auto_remediate"
+                        existing_incident.status = "RESOLVED"
+                        existing_incident.routing_decision = "auto_remediate"
+                        existing_incident.resolved_at = now
+                        if db:
+                            db.add(
+                                IncidentHistory(
+                                    incident_id=existing_incident.id,
+                                    action="AUTO_REMEDIATED",
+                                    old_value="OPEN",
+                                    new_value=f"Action '{proposed_action}' executed automatically by autonomy policy (risk_score={risk_score:.1f} <= 74).",
+                                    changed_by=user_db_id,
+                                )
+                            )
+                            await db.flush()
+                        await sse_manager.broadcast_incident_updated({
+                            "id": str(existing_incident.id),
+                            "title": existing_incident.title,
+                            "severity": severity,
+                            "status": "RESOLVED",
+                            "resolved_at": now,
+                            "updated_at": now,
+                        })
+                        automation_block = {
+                            "execution_status": "SUCCESS",
+                            "actions_executed": [
+                                {
+                                    "action": proposed_action,
+                                    "target": service_name,
+                                    "status": "SUCCESS",
+                                    "semaphore_task_id": exec_res.get("ansible_task_id"),
+                                }
+                            ],
+                            "ansible_task_id": exec_res.get("ansible_task_id"),
+                            "semaphore_history_url": exec_res.get("semaphore_history_url"),
+                        }
+                    except Exception as e_exec:
+                        logger.warning(f"Failed to auto-execute low-risk remediation in debounce: {e_exec}")
+                        incident_status = "OPEN"
+                        routing_decision_str = "human_approval"
+                        automation_block = {"execution_status": "SKIPPED_ESCALATED_TO_HUMAN", "actions_executed": []}
+                else:
+                    # RISK SCORE > 74: Mandate human intervention!
+                    incident_status = "OPEN"
+                    routing_decision_str = "human_approval"
+                    existing_incident.status = "OPEN"
+                    existing_incident.routing_decision = "human_approval"
+                    if db:
+                        await db.flush()
+                    await sse_manager.broadcast_incident_updated({
+                        "id": str(existing_incident.id),
+                        "title": existing_incident.title,
+                        "severity": severity,
+                        "status": "OPEN",
+                        "updated_at": now,
+                    })
+                    automation_block = {"execution_status": "SKIPPED_ESCALATED_TO_HUMAN", "actions_executed": []}
+
                 await sse_manager.broadcast_risk_alert({
                     "service_name": service_name,
                     "risk_score": risk_score,
                     "severity": severity,
-                    "status": "OPEN",
+                    "status": incident_status,
                     "timestamp": now.isoformat(),
                 })
+
+                # Dispatch predictive failure alert to admin via Gmail SMTP
+                is_crit_svc = (risk_score > 74.0)
+                asyncio.create_task(self._send_incident_email({
+                    "incident_id": str(existing_incident.id),
+                    "service_name": service_name,
+                    "severity": severity,
+                    "risk_score": round(risk_score, 2),
+                    "failure_type": failure_type,
+                    "ml_confidence": round(ml_conf, 4),
+                    "rca_confidence": round(rca_conf, 4),
+                    "root_cause": service_name,
+                    "affected_services": [service_name],
+                    "routing_decision": routing_decision_str,
+                    "timestamp": now.isoformat(),
+                    "guidance": f"Elevated fault observed on {service_name}. Human intervention required." if is_crit_svc else f"Autonomous remediation executed for {service_name}.",
+                    "metrics": metrics,
+                    "status": incident_status,
+                    "is_auto_fixed": (risk_score <= 74.0 and auto_executed),
+                    "proposed_action": proposed_action,
+                    "is_critical": is_crit_svc,
+                }))
                 incident_id = existing_incident.id
-                incident_status = "OPEN"
-                routing_block = self._evaluate_confidence_router(ml_conf, rca_conf)
-                decision = routing_block["routing_decision"]
-                automation_block = {"execution_status": "SKIPPED_DEBOUNCED", "actions_executed": []}
+                routing_block = self._evaluate_confidence_router(ml_conf, rca_conf, service_name=service_name, risk_score=risk_score)
+                decision = routing_decision_str
         else:
             # NEW INCIDENT: Invoke GenAI Agent for RCA
             genai_data = await self._call_genai_diagnose(service_name, metrics)
@@ -426,18 +546,12 @@ class OrchestrationService:
                 if genai_data.get("routing_decision"):
                     decision = genai_data["routing_decision"]
 
-            routing_block = self._evaluate_confidence_router(ml_conf, rca_conf)
-            decision = routing_block["routing_decision"]
-
-            automation_block = await self._execute_runbook_action(
-                failure_type=failure_type,
-                target_service=service_name,
-                routing_decision=decision,
-            )
-
-            # In v1 safety rules: remediation requires human approval (no auto restart)
-            incident_status = "OPEN"
             incident_id = uuid4()
+            runbook_block = ml_data.get("runbook", {})
+            proposed_action = runbook_block.get("recommended_action", "SCALE_OUT_PODS")
+            if proposed_action == "SCALE_SERVICE":
+                proposed_action = "SCALE_OUT_PODS"
+
             root_cause_str = (
                 diagnosis_block.get("rca_candidates", [{}])[0].get("service", service_name)
                 if diagnosis_block.get("rca_candidates")
@@ -445,17 +559,18 @@ class OrchestrationService:
             )
             guidance_str = diagnosis_block.get("gemini_explanation", f"Latency degradation observed on {service_name}.")
 
+            incident_title = f"Incident: {failure_type.replace('_', ' ').title()} on {service_name}"
+            incident = None
             if db:
                 incident = Incident(
                     id=incident_id,
-                    title=f"Incident: {failure_type.replace('_', ' ').title()} on {service_name}",
+                    title=incident_title,
                     description=(
                         f"Automated risk detection triggered for {service_name}. "
-                        f"Composite risk score: {risk_score:.1f}, ML Confidence: {ml_conf:.2f}, RCA Confidence: {rca_conf:.2f}. "
-                        f"Routing Decision: HUMAN_APPROVAL."
+                        f"Composite risk score: {risk_score:.1f}, Risk Tier: {severity}, ML Confidence: {ml_conf:.2f}, RCA Confidence: {rca_conf:.2f}."
                     ),
                     severity=severity,
-                    status=incident_status,
+                    status="OPEN",
                     service_id=target_service.id if target_service else None,
                     risk_score=Decimal(str(round(risk_score, 2))),
                     confidence=Decimal(str(round(ml_conf, 4))),
@@ -486,15 +601,112 @@ class OrchestrationService:
                         changed_by=user_db_id,
                     )
                 )
+                await db.flush()
+
+            # Evaluate with Autonomy Budget:
+            # - Incidents with low-mid criticality: automatically fixed (AUTO_EXECUTE)
+            # - Incidents with high criticality & high risk: add human-in-the-loop (REQUIRE_APPROVAL)
+            autonomy_eval = None
+            svc_crit = target_service.criticality if target_service else None
+            if db:
+                try:
+                    autonomy_eval = await autonomy_budget_engine.evaluate(
+                        service_name=service_name,
+                        action=proposed_action,
+                        runbook_id=runbook_block.get("runbook_id"),
+                        incident_id=incident_id,
+                        current_metrics=metrics,
+                        risk_tier=severity,
+                        risk_score=risk_score,
+                        incident_criticality=svc_crit,
+                        db=db,
+                        current_user=current_user,
+                    )
+                except Exception as eval_err:
+                    logger.warning(f"Autonomy evaluation failed in orchestrator: {eval_err}")
+
+            routing_block = self._evaluate_confidence_router(ml_conf, rca_conf, service_name=service_name, risk_score=risk_score)
+            auto_executed = False
+            if autonomy_eval and autonomy_eval.decision == "AUTO_EXECUTE":
+                # LOW-MID CRITICALITY: Automatically fixed without requiring human button click
+                try:
+                    exec_res = await autonomy_budget_engine.execute_remediation_with_budget(
+                        service_name=service_name,
+                        action=proposed_action,
+                        incident_id=incident_id,
+                        remediation_record_id=autonomy_eval.remediation_record_id,
+                        user=current_user,
+                        db=db,
+                        approval_notes="Autonomous low-mid criticality auto-fix executed without operator intervention.",
+                    )
+                    auto_executed = True
+                    incident_status = "RESOLVED"
+                    routing_decision_str = "auto_remediate"
+                    resolved_time = now
+                    automation_block = {
+                        "execution_status": "SUCCESS",
+                        "actions_executed": [
+                            {
+                                "action": proposed_action,
+                                "target": service_name,
+                                "status": "SUCCESS",
+                                "semaphore_task_id": exec_res.get("ansible_task_id"),
+                            }
+                        ],
+                        "ansible_task_id": exec_res.get("ansible_task_id"),
+                        "semaphore_history_url": exec_res.get("semaphore_history_url"),
+                    }
+                except Exception as exec_err:
+                    logger.warning(f"Failed to auto-execute low-mid criticality remediation: {exec_err}")
+                    incident_status = "OPEN"
+                    routing_decision_str = "human_approval"
+                    resolved_time = None
+                    automation_block = {
+                        "execution_status": "SKIPPED_ESCALATED_TO_HUMAN",
+                        "actions_executed": [],
+                    }
+            else:
+                # HIGH CRITICALITY & HIGH RISK: Mandate human-in-the-loop approval
+                incident_status = "OPEN"
+                routing_decision_str = "human_approval"
+                resolved_time = None
+                automation_block = {
+                    "execution_status": "SKIPPED_ESCALATED_TO_HUMAN",
+                    "actions_executed": [],
+                }
+
+            routing_block["routing_decision"] = routing_decision_str
+
+            if db and incident:
+                incident.status = incident_status
+                incident.routing_decision = routing_decision_str
+                incident.resolved_at = resolved_time
+                incident.description = (
+                    f"Automated risk detection triggered for {service_name}. "
+                    f"Composite risk score: {risk_score:.1f}, Risk Tier: {severity}, ML Confidence: {ml_conf:.2f}, RCA Confidence: {rca_conf:.2f}. "
+                    f"Routing Decision: {'AUTO_FIXED (Low-Mid Criticality Policy)' if auto_executed else 'HUMAN_IN_THE_LOOP_REQUIRED (High Criticality & High Risk Policy)'}."
+                )
                 db.add(
                     IncidentHistory(
                         incident_id=incident_id,
                         action="ROUTING_DECIDED",
                         old_value=None,
-                        new_value=f"Confidence router selected 'HUMAN_APPROVAL' (Overall Conf: {routing_block['routing_confidence']:.2f})",
+                        new_value=(
+                            f"Autonomy Policy: {'AUTO_FIXED (Low-Mid Criticality autonomous execution completed)' if auto_executed else f'HUMAN_IN_THE_LOOP_REQUIRED (High criticality / high risk mandates operator sign-off)'}"
+                        ),
                         changed_by=user_db_id,
                     )
                 )
+                if auto_executed:
+                    db.add(
+                        IncidentHistory(
+                            incident_id=incident_id,
+                            action="AUTO_REMEDIATED",
+                            old_value="OPEN",
+                            new_value=f"Action '{proposed_action}' executed automatically by autonomy policy without requiring human intervention.",
+                            changed_by=user_db_id,
+                        )
+                    )
 
                 if target_service:
                     db.add(
@@ -511,12 +723,31 @@ class OrchestrationService:
                     )
 
                 await db.flush()
-                await sse_manager.broadcast_incident_created(incident)
+                await sse_manager.broadcast_incident_created({
+                    "id": str(incident_id),
+                    "title": incident_title,
+                    "severity": severity,
+                    "status": incident_status,
+                    "service_id": str(target_service.id) if target_service else None,
+                    "risk_score": risk_score,
+                    "confidence": ml_conf,
+                    "detected_at": now,
+                })
+                if auto_executed:
+                    await sse_manager.broadcast_incident_updated({
+                        "id": str(incident_id),
+                        "title": incident_title,
+                        "severity": severity,
+                        "status": "RESOLVED",
+                        "resolved_at": now,
+                        "updated_at": now,
+                    })
                 await sse_manager.broadcast_risk_alert({
                     "service_name": service_name,
                     "risk_score": risk_score,
                     "severity": severity,
-                    "routing_decision": "human_approval",
+                    "routing_decision": routing_decision_str,
+                    "status": incident_status,
                     "timestamp": now.isoformat(),
                 })
 
@@ -541,6 +772,7 @@ class OrchestrationService:
             await self._send_n8n_incident(n8n_payload)
 
             # Dispatch predictive failure alert to admin via Gmail SMTP
+            is_crit_svc = (risk_score > 74.0)
             email_payload = {
                 "incident_id": str(incident_id),
                 "service_name": service_name,
@@ -551,12 +783,19 @@ class OrchestrationService:
                 "rca_confidence": round(rca_conf, 4),
                 "root_cause": root_cause_str,
                 "affected_services": diagnosis_block.get("propagation_path", [service_name]),
-                "routing_decision": "human_approval",
+                "routing_decision": routing_decision_str,
                 "timestamp": now.isoformat(),
                 "guidance": guidance_str,
                 "metrics": metrics,
+                "status": incident_status,
+                "is_auto_fixed": auto_executed,
+                "proposed_action": proposed_action,
+                "is_critical": is_crit_svc,
             }
-            await self._send_incident_email(email_payload)
+            try:
+                await self._send_incident_email(email_payload)
+            except Exception as mail_err:
+                logger.warning(f"Failed to dispatch incident alert email: {mail_err}")
 
         # 7. Build unified incident record response
         return UnifiedIncidentRecordResponse(
@@ -579,9 +818,11 @@ class OrchestrationService:
                 "diagnosis_started_at": now.isoformat(),
                 "diagnosis_completed_at": now.isoformat(),
                 "agent_pipeline": ["ml-engine:isolation_forest", "ml-engine:networkx_rca", "genai-agent:confidence_router"],
-                "predicted_root_cause_service": diagnosis_block.get("rca_candidates", [{}])[0].get("service", service_name),
-                "predicted_root_cause_label": diagnosis_block.get("rca_candidates", [{}])[0].get("label", "ROOT_CAUSE"),
-                "root_cause_candidates_ranked": diagnosis_block.get("rca_candidates", []),
+                "predicted_root_cause_service": (diagnosis_block.get("rca_candidates") or [{}])[0].get("service", service_name),
+                "predicted_root_cause_label": (diagnosis_block.get("rca_candidates") or [{}])[0].get("label", "ROOT_CAUSE"),
+                "root_cause_candidates_ranked": diagnosis_block.get("rca_candidates") or [
+                    {"service": service_name, "label": "ROOT_CAUSE", "confidence": rca_conf}
+                ],
                 "propagation_path": diagnosis_block.get("propagation_path", [service_name]),
                 "rca_confidence": rca_conf,
                 "gemini_explanation": diagnosis_block.get("gemini_explanation", "RCA candidate graph traversal completed."),

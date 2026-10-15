@@ -117,10 +117,51 @@ class EmailService:
         routing_decision = str(data.get("routing_decision", "human_approval")).replace("_", " ").title()
         timestamp = data.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"))
         metrics = data.get("metrics", {})
+        is_auto_fixed = bool(data.get("is_auto_fixed", False)) or (data.get("status") == "RESOLVED") or ("auto" in routing_decision.lower())
+        action_name = data.get("proposed_action", "SCALE_OUT_PODS")
 
-        # Color mapping by severity
-        sev_color = "#ef4444" if severity == "CRITICAL" else "#f97316" if severity == "HIGH" else "#eab308"
-        bg_accent = "#1e1b4b" if severity == "CRITICAL" else "#311802" if severity == "HIGH" else "#2e2103"
+        # Color and banner styling based on whether it is auto-fixed or critical human decision
+        if is_auto_fixed:
+            sev_color = "#10b981" # Emerald Green
+            bg_accent = "#064e3b"
+            badge_text = "RESOLVED • AUTO-FIXED"
+            header_title = f"Anomaly on {service_name}: Detected & Automatically Fixed"
+            lead_summary = f"""
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                <div style="font-size: 15px; font-weight: 700; color: #34d399; margin-bottom: 6px;">
+                    ✅ This error was detected and is fixed!
+                </div>
+                <div style="font-size: 13px; color: #e2e8f0; line-height: 1.5;">
+                    An operational anomaly occurred on <strong>{service_name}</strong> ({failure_type}). 
+                    Because this is a low/mid-risk service, Synapse RiskOps autonomy budget 
+                    <strong>automatically executed the remediation ({action_name})</strong> and verified recovery without requiring manual intervention.
+                </div>
+            </div>
+            """
+            cta_button_text = "View Incident History & Audit Trail in Dashboard &rarr;"
+            cta_button_bg = "linear-gradient(135deg, #059669 0%, #10b981 100%)"
+        else:
+            sev_color = "#ef4444" if severity == "CRITICAL" else "#f97316"
+            bg_accent = "#450a0a" if severity == "CRITICAL" else "#431407"
+            badge_text = "CRITICAL • HUMAN INTERVENTION REQUIRED"
+            header_title = f"Critical Error on {service_name}: Action Required"
+            lead_summary = f"""
+            <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
+                <div style="font-size: 16px; font-weight: 800; color: #f87171; margin-bottom: 8px;">
+                    ⚠️ This error has occurred — Proceed to solve this error?
+                </div>
+                <div style="font-size: 13px; color: #e2e8f0; line-height: 1.6;">
+                    A critical error occurred on <strong>{service_name}</strong> ({failure_type}, Risk Score: {risk_score:.1f}%).<br>
+                    <strong>Because {service_name} is a critical service, automated execution is paused.</strong><br>
+                    Human intervention is mandated: Please review and proceed to execute the recommended remediation to solve this error.
+                </div>
+                <div style="margin-top: 14px; font-weight: 700; color: #fecaca; font-size: 14px;">
+                    👉 Would you like to proceed to solve this error now?
+                </div>
+            </div>
+            """
+            cta_button_text = "👉 Proceed to Solve This Error (Approve & Execute) &rarr;"
+            cta_button_bg = "linear-gradient(135deg, #dc2626 0%, #ef4444 100%)"
 
         metrics_rows = ""
         if isinstance(metrics, dict) and metrics:
@@ -146,7 +187,7 @@ class EmailService:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Incident Alert: {service_name}</title>
+    <title>{header_title}</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f1f5f9;">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 24px 0;">
@@ -161,15 +202,15 @@ class EmailService:
                                 <tr>
                                     <td>
                                         <div style="font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: bold; color: {sev_color}; margin-bottom: 4px;">
-                                            SYNAPSE RISKOPS • PREDICTIVE ALERT
+                                            SYNAPSE RISKOPS • NOTIFICATION
                                         </div>
-                                        <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #ffffff;">
-                                            Service Failure Predicted: <span style="color: #38bdf8;">{service_name}</span>
+                                        <h1 style="margin: 0; font-size: 20px; font-weight: 800; color: #ffffff;">
+                                            {header_title}
                                         </h1>
                                     </td>
                                     <td align="right" valign="top">
-                                        <span style="display: inline-block; padding: 6px 14px; background: {sev_color}; color: #ffffff; font-size: 12px; font-weight: 800; border-radius: 9999px; letter-spacing: 0.5px;">
-                                            {severity}
+                                        <span style="display: inline-block; padding: 6px 14px; background: {sev_color}; color: #ffffff; font-size: 11px; font-weight: 800; border-radius: 9999px; letter-spacing: 0.5px; white-space: nowrap;">
+                                            {badge_text}
                                         </span>
                                     </td>
                                 </tr>
@@ -181,11 +222,14 @@ class EmailService:
                     <tr>
                         <td style="padding: 24px 30px;">
                             
+                            <!-- Notice Banner -->
+                            {lead_summary}
+
                             <!-- Key Incident Snapshot -->
                             <table width="100%" cellspacing="0" cellpadding="0" style="margin-bottom: 20px; background: #1a243b; border-radius: 10px; border: 1px solid #2d3b5b; padding: 16px;">
                                 <tr>
                                     <td width="50%" style="padding: 8px 12px; vertical-align: top;">
-                                        <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Predicted Failure Type</div>
+                                        <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Incident Failure Type</div>
                                         <div style="font-size: 15px; font-weight: 700; color: #f8fafc; margin-top: 2px;">{failure_type}</div>
                                     </td>
                                     <td width="50%" style="padding: 8px 12px; vertical-align: top;">
@@ -209,7 +253,7 @@ class EmailService:
                                         <div style="font-size: 13px; font-weight: 600; color: #a7f3d0; margin-top: 2px;">{routing_decision}</div>
                                     </td>
                                     <td width="50%" style="padding: 8px 12px; vertical-align: top;">
-                                        <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Detection Time</div>
+                                        <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Timestamp</div>
                                         <div style="font-size: 12px; font-weight: 500; color: #cbd5e1; margin-top: 2px;">{timestamp}</div>
                                     </td>
                                 </tr>
@@ -218,7 +262,7 @@ class EmailService:
                             <!-- AI RCA & Guidance -->
                             <div style="margin-bottom: 20px; background: #0f172a; border-left: 4px solid #6366f1; border-radius: 4px; padding: 14px 18px;">
                                 <div style="font-size: 12px; font-weight: 700; color: #818cf8; text-transform: uppercase; margin-bottom: 4px;">
-                                    AI Root Cause Guidance
+                                    AI Diagnosis & Playbook Guidance
                                 </div>
                                 <div style="font-size: 13px; line-height: 1.5; color: #e2e8f0;">
                                     {guidance}
@@ -236,16 +280,16 @@ class EmailService:
                             <!-- Primary CTA Button -->
                             <table width="100%" cellspacing="0" cellpadding="0">
                                 <tr>
-                                    <td align="center" style="padding: 8px 0 16px 0;">
-                                        <a href="{dashboard_url}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%); color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 700; padding: 12px 28px; border-radius: 8px; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);">
-                                            Open Incident in RiskOps Dashboard &rarr;
+                                    <td align="center" style="padding: 12px 0 20px 0;">
+                                        <a href="{dashboard_url}" target="_blank" style="display: inline-block; background: {cta_button_bg}; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 800; padding: 14px 30px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);">
+                                            {cta_button_text}
                                         </a>
                                     </td>
                                 </tr>
                             </table>
 
-                            <div style="font-size: 11px; color: #64748b; text-align: center; margin-top: 8px;">
-                                Incident ID: <span style="font-family: monospace;">{incident_id}</span>
+                            <div style="font-size: 11px; color: #64748b; text-align: center; margin-top: 4px;">
+                                Incident Reference: <span style="font-family: monospace;">{incident_id}</span>
                             </div>
 
                         </td>
@@ -255,7 +299,7 @@ class EmailService:
                     <tr>
                         <td style="padding: 16px 30px; background: #0c1220; border-top: 1px solid #1e293b; text-align: center;">
                             <div style="font-size: 11px; color: #64748b; line-height: 1.5;">
-                                This is an automated priority alert sent by <strong>Synapse RiskOps</strong>.<br>
+                                This is an automated notification from <strong>Synapse RiskOps</strong>.<br>
                                 Sender: <span style="font-family: monospace; color: #94a3b8;">{self.sender_email}</span> &bull; 
                                 Admin: <span style="font-family: monospace; color: #94a3b8;">{self.admin_email}</span>
                             </div>
@@ -277,43 +321,30 @@ class EmailService:
         severity = data.get("severity", "CRITICAL").upper()
         risk_score = float(data.get("risk_score", 0.0))
         failure_type = str(data.get("failure_type", "latency_degradation")).replace("_", " ").title()
-        root_cause = data.get("root_cause", service_name)
-        ml_confidence = float(data.get("ml_confidence", 0.0)) * 100.0 if float(data.get("ml_confidence", 0.0)) <= 1.0 else float(data.get("ml_confidence", 0.0))
-        rca_confidence = float(data.get("rca_confidence", 0.0)) * 100.0 if float(data.get("rca_confidence", 0.0)) <= 1.0 else float(data.get("rca_confidence", 0.0))
-        guidance = data.get("guidance", "Telemetry anomalies detected. Immediate triage recommended.")
-        routing_decision = str(data.get("routing_decision", "human_approval")).replace("_", " ").title()
-        timestamp = data.get("timestamp", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"))
-        metrics = data.get("metrics", {})
+        is_auto_fixed = bool(data.get("is_auto_fixed", False)) or (data.get("status") == "RESOLVED")
+        action_name = data.get("proposed_action", "SCALE_OUT_PODS")
 
-        metrics_str = ""
-        if isinstance(metrics, dict) and metrics:
-            for k, v in list(metrics.items())[:8]:
-                metrics_str += f"  - {k}: {v}\n"
+        if is_auto_fixed:
+            status_line = f"STATUS: RESOLVED (AUTO-FIXED)\nThis error was detected on {service_name} ({failure_type}) and has been automatically resolved by Synapse RiskOps via {action_name}."
         else:
-            metrics_str = "  None provided\n"
+            status_line = f"STATUS: CRITICAL (ACTION REQUIRED)\nThis critical error occurred on {service_name} ({failure_type}, Risk: {risk_score:.1f}%). Proceed to solve this error? Please review and approve remediation."
 
         return f"""=======================================================
-SYNAPSE RISKOPS • PREDICTIVE INCIDENT ALERT
+SYNAPSE RISKOPS • INCIDENT ALERT
 =======================================================
 
+{status_line}
+
 SERVICE PREDICTED TO FAIL: {service_name}
+Service: {service_name}
 Severity: {severity}
 Incident ID: {incident_id}
 Risk Score: {risk_score:.1f}%
 Predicted Failure: {failure_type}
-Root Cause Service: {root_cause}
-Confidence (ML / RCA): {ml_confidence:.1f}% / {rca_confidence:.1f}%
-Routing Decision: {routing_decision}
-Timestamp: {timestamp}
+Root Cause Service: {data.get("root_cause", service_name)}
+Timestamp: {data.get("timestamp", "")}
 
-AI GUIDANCE:
-{guidance}
-
-TELEMETRY SNAPSHOT:
-{metrics_str}
-
-ACTION REQUIRED:
-Review incident details and execute or approve remediation:
+Review and manage incident in dashboard:
 http://localhost:5173/dashboard?incident_id={incident_id}
 
 -------------------------------------------------------
@@ -467,8 +498,12 @@ Sent via Gmail SMTP ({self.sender_email}) to Admin ({self.admin_email}).
         severity = incident_data.get("severity", "CRITICAL").upper()
         risk_score = float(incident_data.get("risk_score", 0.0))
         failure_type = str(incident_data.get("failure_type", "latency_degradation")).replace("_", " ").title()
+        is_auto_fixed = bool(incident_data.get("is_auto_fixed", False)) or (incident_data.get("status") == "RESOLVED") or ("auto" in str(incident_data.get("routing_decision", "")).lower())
 
-        subject = f"🚨 [{severity}] Predicted Failure on {service_name}: {failure_type} ({risk_score:.1f}% Risk)"
+        if is_auto_fixed:
+            subject = f"✅ [AUTO-RESOLVED] Synapse RiskOps: {failure_type} on {service_name} was detected and is fixed"
+        else:
+            subject = f"🚨 [ACTION REQUIRED] Critical Incident on {service_name}: Proceed to solve this error?"
         html_content = self._build_incident_html(incident_data)
         text_content = self._build_incident_text(incident_data)
 

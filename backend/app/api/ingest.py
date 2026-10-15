@@ -99,7 +99,7 @@ async def ingest_metrics(
     cpu = metric_dict.get("cpu_usage", 0.0)
     p99 = metric_dict.get("response_time_p99", 0.0)
 
-    is_anomaly = err >= 5.0 or cpu >= 75.0 or p99 >= 150.0
+    is_anomaly = err >= 5.0 or cpu >= 80.0 or p99 >= 350.0
     incident_triggered = False
     anomaly_score = 0.85 if is_anomaly else 0.15
 
@@ -117,6 +117,7 @@ async def ingest_metrics(
             incident_triggered = True
         except Exception as e:
             logger.warning(f"Error executing orchestrator lifecycle for ingested metric: {e}")
+            await db.rollback()
 
 
     # 4. Broadcast real-time SSE telemetry event

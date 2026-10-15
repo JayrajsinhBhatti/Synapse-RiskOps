@@ -21,7 +21,8 @@ import 'reactflow/dist/style.css';
 
 import { useTopology, useIncidents } from '../hooks/useIncidents';
 import { getRiskScoreStyle, getServiceHealthBadge } from '../utils/formatters';
-import { Network, Server, Layers, AlertCircle, RefreshCw } from 'lucide-react';
+import { Network, Server, Layers, AlertCircle, RefreshCw, Flame } from 'lucide-react';
+import { fetchCausalGraph } from '../api/causal';
 
 /**
  * Custom Node component representing a Microservice
@@ -230,6 +231,24 @@ export default function DependencyGraphView({
   const { data: topologyData, isLoading, refetch } = useTopology();
   const { data: incidentsData } = useIncidents();
   const [selectedTier, setSelectedTier] = useState('ALL');
+  const [showCausalOverlay, setShowCausalOverlay] = useState(false);
+  const [causalEdgesMap, setCausalEdgesMap] = useState({});
+
+  useEffect(() => {
+    if (showCausalOverlay) {
+      fetchCausalGraph()
+        .then((data) => {
+          if (data && data.edges) {
+            const map = {};
+            data.edges.forEach((e) => {
+              map[`${e.source}->${e.target}`] = e;
+            });
+            setCausalEdgesMap(map);
+          }
+        })
+        .catch((err) => console.debug('Causal fetch notice:', err));
+    }
+  }, [showCausalOverlay]);
 
   const { initialNodes, initialEdges } = useMemo(() => {
     if (!topologyData) {
@@ -415,20 +434,51 @@ export default function DependencyGraphView({
 
         const isImpacted = isIncidentEdge || isSelectedEdge;
 
+        const causalEdge = showCausalOverlay
+          ? (causalEdgesMap[`${srcName}->${tgtName}`] || causalEdgesMap[`${src}->${tgt}`])
+          : null;
+
+        let strokeColor = isIncidentEdge ? '#ef4444' : isSelectedEdge ? '#f59e0b' : '#6366f1';
+        let strokeWidth = isImpacted ? 2.5 : 1.5;
+        let strokeDasharray = undefined;
+        let edgeLabel = undefined;
+
+        if (causalEdge) {
+          if (causalEdge.provenance === 'VALIDATED_CAUSAL') {
+            strokeColor = '#10b981';
+          } else if (causalEdge.provenance === 'OBSERVED') {
+            strokeColor = '#f59e0b';
+            strokeDasharray = '5 5';
+          } else if (causalEdge.provenance === 'UNCERTAIN') {
+            strokeColor = '#f97316';
+            strokeDasharray = '3 3';
+          }
+          strokeWidth = Math.max(1.8, Math.min(5.5, 1.5 + causalEdge.causal_strength * 3.5));
+          edgeLabel = `${(causalEdge.causal_strength * 100).toFixed(0)}% • ${Math.round(causalEdge.propagation_delay_ms)}ms`;
+        }
+
         return {
           id: `edge-${idx}-${src}-${tgt}`,
           source: src,
           target: tgt,
           type: 'smoothstep',
-          animated: isImpacted,
+          animated: isImpacted || (causalEdge && causalEdge.provenance === 'VALIDATED_CAUSAL'),
+          label: edgeLabel,
+          labelStyle: edgeLabel
+            ? { fontSize: '10px', fill: strokeColor, fontWeight: 700, fontFamily: 'monospace' }
+            : undefined,
+          labelBgStyle: edgeLabel
+            ? { fill: '#0f172a', fillOpacity: 0.85, stroke: strokeColor, strokeWidth: 1, rx: 4 }
+            : undefined,
           style: {
-            stroke: isIncidentEdge ? '#ef4444' : isSelectedEdge ? '#f59e0b' : '#6366f1',
-            strokeWidth: isImpacted ? 2.5 : 1.5,
-            opacity: isImpacted ? 0.95 : 0.45,
+            stroke: strokeColor,
+            strokeWidth,
+            strokeDasharray,
+            opacity: isImpacted || causalEdge ? 0.95 : 0.45,
           },
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: isIncidentEdge ? '#ef4444' : isSelectedEdge ? '#f59e0b' : '#6366f1',
+            color: strokeColor,
             width: 15,
             height: 15,
           },
@@ -436,7 +486,7 @@ export default function DependencyGraphView({
       });
 
     return { initialNodes: nodes, initialEdges: edges };
-  }, [topologyData, incidentsData, selectedTier, selectedServiceId, activeIncidentServiceId]);
+  }, [topologyData, incidentsData, selectedTier, selectedServiceId, activeIncidentServiceId, showCausalOverlay, causalEdgesMap]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -480,6 +530,19 @@ export default function DependencyGraphView({
               </button>
             ))}
           </div>
+
+          <button
+            onClick={() => setShowCausalOverlay((v) => !v)}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+              showCausalOverlay
+                ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                : 'dark:bg-slate-800 bg-white dark:text-slate-300 text-slate-700 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+            }`}
+            title="Toggle Chaos-Calibrated Causal Overlay"
+          >
+            <Flame className="w-3.5 h-3.5 text-amber-300" />
+            {showCausalOverlay ? 'Causal Overlay: ON' : 'Causal Overlay'}
+          </button>
 
           <button
             onClick={() => refetch()}

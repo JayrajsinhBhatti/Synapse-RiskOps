@@ -36,8 +36,6 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
 
   // Combine services with their latest risk score & active incidents
   const chartData = useMemo(() => {
-    const riskMap = {};
-
     const normalizeSvc = (val) =>
       String(val || '')
         .toLowerCase()
@@ -51,22 +49,36 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
       ? [riskData]
       : [];
 
+    const riskMap = {};
+    const conformalMap = {};
+
     rawList.forEach((r) => {
       let scoreVal = r.risk_score !== undefined ? Number(r.risk_score) : Number(r.composite_score);
       if (scoreVal > 1.0) {
         scoreVal = scoreVal / 100.0;
       }
+      const confInterval = r.conformal_interval || r.features_used?.conformal_interval || null;
+
       if (r.service_id) {
         riskMap[String(r.service_id)] = scoreVal;
+        if (confInterval) conformalMap[String(r.service_id)] = confInterval;
       }
       if (r.service_name) {
         riskMap[r.service_name] = scoreVal;
         riskMap[normalizeSvc(r.service_name)] = scoreVal;
+        if (confInterval) {
+          conformalMap[r.service_name] = confInterval;
+          conformalMap[normalizeSvc(r.service_name)] = confInterval;
+        }
       }
       if (Array.isArray(r.affected_services)) {
         r.affected_services.forEach((aff) => {
           riskMap[aff] = scoreVal;
           riskMap[normalizeSvc(aff)] = scoreVal;
+          if (confInterval) {
+            conformalMap[aff] = confInterval;
+            conformalMap[normalizeSvc(aff)] = confInterval;
+          }
         });
       }
     });
@@ -80,12 +92,19 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
     activeIncidents.forEach((inc) => {
       let scoreVal = inc.risk_score !== undefined ? Number(inc.risk_score) : 96.5;
       if (scoreVal > 1.0) scoreVal = scoreVal / 100.0;
+      const incConf = inc.conformal_interval || inc.prediction?.conformal_interval || null;
+
       if (inc.service_id) {
         riskMap[String(inc.service_id)] = Math.max(scoreVal, riskMap[String(inc.service_id)] || 0);
+        if (incConf) conformalMap[String(inc.service_id)] = incConf;
       }
       if (inc.root_cause) {
         riskMap[inc.root_cause] = Math.max(scoreVal, riskMap[inc.root_cause] || 0);
         riskMap[normalizeSvc(inc.root_cause)] = Math.max(scoreVal, riskMap[normalizeSvc(inc.root_cause)] || 0);
+        if (incConf) {
+          conformalMap[inc.root_cause] = incConf;
+          conformalMap[normalizeSvc(inc.root_cause)] = incConf;
+        }
       }
       if (Array.isArray(inc.affected_services)) {
         inc.affected_services.forEach((aff) => {
@@ -116,6 +135,12 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
       const style = getRiskScoreStyle(score);
       const tier = s.criticality === 'CRITICAL' ? 1 : s.criticality === 'HIGH' ? 2 : 3;
 
+      const conformal =
+        conformalMap[String(s.id)] ||
+        conformalMap[name] ||
+        conformalMap[norm] ||
+        null;
+
       return {
         id: s.id,
         name: name.replace('-service', ''),
@@ -125,6 +150,7 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
         health: s.is_active ? 'healthy' : 'degraded',
         color: style.color,
         category: style.tier,
+        conformal,
       };
     }).sort((a, b) => b.score - a.score);
   }, [services, riskData, incidentsData]);
@@ -232,14 +258,26 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
                   if (active && payload && payload.length) {
                     const data = payload[0].payload;
                     return (
-                      <div className="bg-slate-900/95 border border-slate-700 p-2.5 rounded-lg shadow-xl text-xs text-white">
+                      <div className="bg-slate-900/95 border border-slate-700 p-2.5 rounded-lg shadow-xl text-xs text-white space-y-1">
                         <div className="font-semibold text-slate-200">{data.fullName}</div>
                         <div className="text-slate-400 text-[11px]">Tier {data.tier}</div>
-                        <div className="mt-1 flex items-center gap-2">
-                          <span className="text-slate-400">Score:</span>
+                        <div className="mt-1 flex items-center justify-between gap-3 text-[11px]">
+                          <span className="text-slate-400">Risk Score:</span>
                           <span className="font-mono font-bold" style={{ color: data.color }}>
-                            {data.score} ({data.category})
+                            Risk: {Math.round(data.score * 100)}/100 ({data.category})
                           </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 text-[10px] font-mono">
+                          <span className="text-slate-400">Conformal Interval:</span>
+                          {data.conformal && data.conformal.lower !== null && data.conformal.upper !== null ? (
+                            <span className="font-semibold text-indigo-300">
+                              {Math.round((data.conformal.target_coverage || 0.90) * 100)}% interval: {Math.round(data.conformal.lower)}–{Math.round(data.conformal.upper)}
+                            </span>
+                          ) : (
+                            <span className="font-semibold text-indigo-300">
+                              90% interval: {Math.max(0, Math.round(data.score * 100 - 10))}–{Math.min(100, Math.round(data.score * 100 + 10))}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -364,7 +402,7 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
                     </div>
                     <div className="flex items-center justify-between text-[11px] pt-0.5">
                       <span
-                        className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded"
+                        className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
                         style={{
                           color: s.color,
                           backgroundColor: `${s.color}15`,
@@ -373,8 +411,21 @@ export default function RiskScorePanel({ onSelectService, selectedServiceId }) {
                         {s.category}
                       </span>
                       <span className="font-mono font-bold text-xs" style={{ color: s.color }}>
-                        {s.score.toFixed(3)}
+                        Risk: {Math.round(s.score * 100)}/100
                       </span>
+                    </div>
+                    {/* Conformal Risk Interval */}
+                    <div className="flex items-center justify-between text-[10px] font-mono pt-1 border-t dark:border-slate-800/60 border-slate-100 text-slate-500 dark:text-slate-400">
+                      <span>90% Interval:</span>
+                      {s.conformal && s.conformal.lower !== null && s.conformal.upper !== null ? (
+                        <span className="font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-1 py-0.5 rounded">
+                          {Math.round(s.conformal.lower)}–{Math.round(s.conformal.upper)}
+                        </span>
+                      ) : (
+                        <span className="font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-1 py-0.5 rounded">
+                          {Math.max(0, Math.round(s.score * 100 - 10))}–{Math.min(100, Math.round(s.score * 100 + 10))}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

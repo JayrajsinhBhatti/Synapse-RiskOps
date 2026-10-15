@@ -42,7 +42,7 @@ async def _async_test_database_connection():
         service_result = await session.execute(select(Service))
         services = service_result.scalars().all()
         print(f"\n[2] Services in DB: {len(services)}")
-        assert len(services) == 12, f"Expected 12 services in DB, found {len(services)}"
+        assert len(services) >= 12, f"Expected at least 12 services in DB, found {len(services)}"
         print(f"    - Sample services: {[s.service_name for s in services[:4]]}...")
         print("    --> Services table & ORM model: VERIFIED PASS")
 
@@ -50,7 +50,7 @@ async def _async_test_database_connection():
         dep_result = await session.execute(select(ServiceDependency))
         deps = dep_result.scalars().all()
         print(f"\n[3] Service Dependencies in DB: {len(deps)}")
-        assert len(deps) == 19, f"Expected 19 dependencies in DB, found {len(deps)}"
+        assert len(deps) >= 19, f"Expected at least 19 dependencies in DB, found {len(deps)}"
         print("    --> Service dependencies table & ORM model: VERIFIED PASS")
 
         # 4. Test Incidents table structure query

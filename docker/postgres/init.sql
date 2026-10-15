@@ -217,3 +217,84 @@ FROM (VALUES
 JOIN services s ON s.service_name = dep.source_name
 JOIN services t ON t.service_name = dep.target_name
 ON CONFLICT (source_service_id, target_service_id) DO NOTHING;
+
+-- =====================================================
+-- AUTONOMY POLICIES TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS autonomy_policies (
+    id                                      VARCHAR(50) PRIMARY KEY DEFAULT 'default',
+    low_risk_auto_execute                  BOOLEAN NOT NULL DEFAULT TRUE,
+    medium_risk_requires_approval           BOOLEAN NOT NULL DEFAULT TRUE,
+    critical_services_always_require_approval BOOLEAN NOT NULL DEFAULT TRUE,
+    min_historical_samples                  FLOAT NOT NULL DEFAULT 3.0,
+    error_budget_threshold_percent          FLOAT NOT NULL DEFAULT 20.0,
+    max_auto_recovery_time_seconds          FLOAT NOT NULL DEFAULT 60.0,
+    updated_at                              TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+INSERT INTO autonomy_policies (id, low_risk_auto_execute, medium_risk_requires_approval, critical_services_always_require_approval, min_historical_samples, error_budget_threshold_percent, max_auto_recovery_time_seconds)
+VALUES ('default', TRUE, TRUE, TRUE, 3.0, 20.0, 60.0)
+ON CONFLICT (id) DO NOTHING;
+
+-- =====================================================
+-- REMEDIATION RECORDS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS remediation_records (
+    id                              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    incident_id                     UUID REFERENCES incidents(id) ON DELETE SET NULL,
+    service_name                    VARCHAR(100) NOT NULL,
+    action                          VARCHAR(100) NOT NULL,
+    runbook_id                      VARCHAR(100),
+    risk_level                      VARCHAR(20) NOT NULL DEFAULT 'MEDIUM',
+    autonomy_decision               VARCHAR(30) NOT NULL,
+    approval_status                 VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    status                          VARCHAR(30) NOT NULL DEFAULT 'PROPOSED',
+    approved_by                     UUID REFERENCES users(id) ON DELETE SET NULL,
+    approved_by_username            VARCHAR(100),
+    approved_at                     TIMESTAMP WITH TIME ZONE,
+    rejection_reason                TEXT,
+    estimated_execution_seconds     FLOAT,
+    estimated_recovery_seconds      FLOAT,
+    estimate_source                 VARCHAR(30) NOT NULL DEFAULT 'calculated',
+    estimate_uncertainty            VARCHAR(50),
+    estimate_display                TEXT,
+    actual_execution_seconds        FLOAT,
+    actual_recovery_seconds         FLOAT,
+    success                         BOOLEAN,
+    post_remediation_health         VARCHAR(50),
+    ansible_task_id                 VARCHAR(100),
+    semaphore_url                   TEXT,
+    execution_logs                  JSONB,
+    pre_metrics                     JSONB,
+    post_metrics                    JSONB,
+    reasoning                       TEXT,
+    evaluation_factors              JSONB,
+    created_at                      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    executed_at                     TIMESTAMP WITH TIME ZONE,
+    completed_at                    TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_remediation_records_service ON remediation_records(service_name);
+CREATE INDEX IF NOT EXISTS idx_remediation_records_action ON remediation_records(action);
+CREATE INDEX IF NOT EXISTS idx_remediation_records_incident ON remediation_records(incident_id);
+
+-- =====================================================
+-- AUTONOMY AUDIT LOGS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS autonomy_audit_logs (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    remediation_id      UUID REFERENCES remediation_records(id) ON DELETE CASCADE,
+    event_type          VARCHAR(50) NOT NULL,
+    service_name        VARCHAR(100) NOT NULL,
+    action              VARCHAR(100) NOT NULL,
+    user_id             UUID REFERENCES users(id) ON DELETE SET NULL,
+    user_role           VARCHAR(50),
+    user_username       VARCHAR(100),
+    decision            VARCHAR(30),
+    details             JSONB,
+    timestamp           TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_autonomy_audit_event ON autonomy_audit_logs(event_type);
+CREATE INDEX IF NOT EXISTS idx_autonomy_audit_timestamp ON autonomy_audit_logs(timestamp);
+

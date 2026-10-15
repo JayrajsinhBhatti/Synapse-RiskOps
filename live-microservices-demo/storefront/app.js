@@ -4,7 +4,7 @@
  * Executes genuine distributed HTTP requests across all 10 microservices.
  */
 
-const API_BASE = "http://localhost:9101/api";
+const API_BASE = `http://${window.location.hostname || "localhost"}:9101/api`;
 
 // App State
 let currentUser = {

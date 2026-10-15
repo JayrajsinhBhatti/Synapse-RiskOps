@@ -39,7 +39,7 @@ MICROSERVICES_PORTS = {
     "recommendation-service": 9110,
 }
 
-SAMPLE_USERS = ["usr-admin", "usr-john"]
+SAMPLE_USERS = ["bot-traffic-1", "bot-traffic-2", "bot-traffic-3"]
 
 
 async def simulate_user_session(client: httpx.AsyncClient):
@@ -109,7 +109,7 @@ async def harvest_and_stream_telemetry(client: httpx.AsyncClient):
             cpu = 20.0
             mem = 35.0
             error_rate = 0.0
-            p99 = max(15.0, latency_ms)
+            p99 = 28.0 + random.uniform(1.0, 10.0)
             req_count = 10
             active_conns = 4
 
@@ -142,6 +142,13 @@ async def harvest_and_stream_telemetry(client: httpx.AsyncClient):
                     error_rate = 100.0
                     p99 = max(p99, 5000.0)
                     latency_ms = max(latency_ms, 5000.0)
+            else:
+                # No active chaos fault injected: strictly maintain healthy baseline (no false alerts)!
+                error_rate = 0.0
+                cpu = round(random.uniform(14.0, 25.0), 1)
+                mem = round(random.uniform(30.0, 42.0), 1)
+                p99 = round(random.uniform(20.0, 45.0), 1)
+                latency_ms = round(random.uniform(10.0, 24.0), 1)
 
 
             # Prepare standardized telemetry payload for Synapse
@@ -178,12 +185,12 @@ async def harvest_and_stream_telemetry(client: httpx.AsyncClient):
 async def check_synapse_connected(client: httpx.AsyncClient) -> bool:
     """Check if Synapse RiskOps is in connected mode before streaming operational telemetry."""
     try:
-        resp = await client.get(f"{SYNAPSE_BACKEND_URL}/api/system/mode", timeout=3.0)
+        resp = await client.get(f"{SYNAPSE_BACKEND_URL}/api/system/mode", timeout=5.0)
         if resp.status_code == 200:
             data = resp.json()
             return data.get("mode") == "connected" and bool(data.get("external_app_connected", False))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"check_synapse_connected probe error: {e}")
     return False
 
 
@@ -200,12 +207,14 @@ async def main_loop():
                 h_res = await client.get(f"{GATEWAY_URL}/operations/system-status", timeout=2.0)
                 if h_res.status_code == 200:
                     h_data = h_res.json()
-                    for svc in h_data.get("services", []):
-                        if svc.get("has_active_fault"):
+                    services_data = h_data.get("services", {})
+                    items = services_data.values() if isinstance(services_data, dict) else services_data
+                    for svc in items:
+                        if isinstance(svc, dict) and svc.get("has_active_fault"):
                             has_any_active_fault = True
                             break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error checking active faults: {e}")
 
             if not is_connected and not has_any_active_fault:
                 if last_log_state != "disconnected":

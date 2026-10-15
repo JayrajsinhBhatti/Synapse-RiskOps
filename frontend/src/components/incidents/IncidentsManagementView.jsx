@@ -20,6 +20,7 @@ import {
   useDeleteAllIncidents,
   useRetentionSettings,
   useUpdateRetentionSettings,
+  useExecuteRemediation,
 } from '../../hooks/useIncidents';
 import { useAuth } from '../../context/AuthContext';
 import { useWorkspace } from '../../context/WorkspaceContext';
@@ -57,6 +58,8 @@ export default function IncidentsManagementView({ onSelectService }) {
   const deleteAllIncidentsMutation = useDeleteAllIncidents();
   const { data: retentionData } = useRetentionSettings();
   const updateRetentionMutation = useUpdateRetentionSettings();
+  const executeRemediationMutation = useExecuteRemediation();
+  const [executingIncidentId, setExecutingIncidentId] = useState(null);
 
   const incidents = Array.isArray(incidentsData) ? incidentsData : [];
   const services = Array.isArray(servicesData) ? servicesData : [];
@@ -83,7 +86,7 @@ export default function IncidentsManagementView({ onSelectService }) {
 
   const filteredIncidents = useMemo(() => {
     return incidents.filter((inc) => {
-      const svcName = serviceMap[inc.service_id] || '';
+      const svcName = inc.service_name || serviceMap[inc.service_id] || inc.root_cause || '';
       const matchesSearch =
         inc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         svcName.toLowerCase().includes(searchTerm.toLowerCase());
@@ -112,6 +115,25 @@ export default function IncidentsManagementView({ onSelectService }) {
       });
     } catch (err) {
       console.error('Failed to update incident status:', err);
+    }
+  };
+
+  const handleApproveAndExecute = async (inc) => {
+    if (!inc) return;
+    setExecutingIncidentId(inc.id);
+    try {
+      const targetSvc = inc.service_name || serviceMap[inc.service_id] || inc.root_cause || 'payment-service';
+      await executeRemediationMutation.mutateAsync({
+        incident_id: inc.id,
+        failure_type: inc.predicted_failure_type || 'ANOMALOUS_SATURATION',
+        service_id: inc.service_id,
+        target: targetSvc,
+        action: 'SCALE_OUT_PODS',
+      });
+    } catch (err) {
+      console.error('Approve and execute error:', err);
+    } finally {
+      setExecutingIncidentId(null);
     }
   };
 
@@ -231,7 +253,7 @@ export default function IncidentsManagementView({ onSelectService }) {
               const isSelected = activeIncident?.id === inc.id;
               const sev = getSeverityBadge(inc.severity);
               const stat = getStatusBadge(inc.status);
-              const svcName = serviceMap[inc.service_id] || 'system-service';
+              const svcName = inc.service_name || serviceMap[inc.service_id] || inc.root_cause || (inc.service_id ? String(inc.service_id).slice(0, 8) : 'system-service');
 
               return (
                 <div
@@ -266,11 +288,27 @@ export default function IncidentsManagementView({ onSelectService }) {
                       <Server className="w-3 h-3" />
                       {svcName}
                     </span>
-                    {inc.risk_score && (
-                      <span className="text-rose-500 dark:text-rose-400 font-bold">
-                        Risk: {Number(inc.risk_score).toFixed(0)}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {inc.risk_score && (
+                        <span className={`font-bold ${Number(inc.risk_score) > 74 ? 'text-rose-500 dark:text-rose-400' : 'text-emerald-500 dark:text-emerald-400'}`}>
+                          Risk: {Number(inc.risk_score).toFixed(0)}
+                        </span>
+                      )}
+                      {inc.status !== 'RESOLVED' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleApproveAndExecute(inc);
+                          }}
+                          disabled={executingIncidentId === inc.id}
+                          className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold flex items-center gap-1 transition-all"
+                          title="Directly approve and execute remediation on this tab"
+                        >
+                          <Zap className="w-2.5 h-2.5 fill-current" />
+                          {executingIncidentId === inc.id ? '...' : 'Approve'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -301,6 +339,28 @@ export default function IncidentsManagementView({ onSelectService }) {
 
                   {/* Quick Action Transition Buttons */}
                   <div className="flex items-center gap-2">
+                    {/* Direct Same-Tab Human Approve & Execute Button */}
+                    {activeIncident.status !== 'RESOLVED' && (
+                      <button
+                        onClick={() => handleApproveAndExecute(activeIncident)}
+                        disabled={executingIncidentId === activeIncident.id || executeRemediationMutation.isPending}
+                        className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all disabled:opacity-50"
+                        title="Directly approve and execute remediation on this tab"
+                      >
+                        {executingIncidentId === activeIncident.id ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            Executing...
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-3.5 h-3.5 fill-current" />
+                            Approve & Execute
+                          </>
+                        )}
+                      </button>
+                    )}
+
                     {activeIncident.status === 'OPEN' && (
                       <button
                         onClick={() => handleStatusChange(activeIncident.id, 'INVESTIGATING')}
@@ -308,17 +368,17 @@ export default function IncidentsManagementView({ onSelectService }) {
                         className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-600 dark:text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-all"
                       >
                         <Activity className="w-3.5 h-3.5" />
-                        Acknowledge & Investigate
+                        Investigate
                       </button>
                     )}
                     {activeIncident.status !== 'RESOLVED' && (
                       <button
                         onClick={() => handleStatusChange(activeIncident.id, 'RESOLVED')}
                         disabled={updateStatusMutation.isPending}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-600 dark:text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition-all"
+                        className="px-3 py-1.5 rounded-lg bg-slate-700/50 hover:bg-slate-700 border border-slate-600 text-slate-300 font-bold text-xs flex items-center gap-1.5 transition-all"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        Mark Resolved
+                        Resolve
                       </button>
                     )}
 

@@ -28,6 +28,10 @@ from app.api.chaos import router as chaos_router
 from app.api.system import router as system_router
 from app.api.retention import router as retention_router
 from app.api.ingest import router as ingest_router
+from app.api.autonomy import router as autonomy_router
+from app.api.cascade import router as cascade_router
+from app.api.causal import router as causal_router
+from app.api.dry_run import router as dry_run_router
 
 logger = logging.getLogger("synapse.main")
 
@@ -53,6 +57,15 @@ async def _periodic_retention_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup, background retention loop, and shutdown."""
+    # Ensure all registered database tables exist
+    try:
+        from app.core.database import async_engine, Base
+        import app.models  # load models
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as e:
+        logger.warning(f"Database schema auto-creation notice: {e}")
+
     retention_task = asyncio.create_task(_periodic_retention_worker())
     try:
         yield
@@ -88,6 +101,10 @@ app.include_router(chaos_router)
 app.include_router(system_router)
 app.include_router(retention_router)
 app.include_router(ingest_router)
+app.include_router(autonomy_router)
+app.include_router(cascade_router)
+app.include_router(causal_router)
+app.include_router(dry_run_router)
 
 # =====================================================
 # CORS Middleware

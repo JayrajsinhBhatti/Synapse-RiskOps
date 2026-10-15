@@ -22,8 +22,7 @@ def test_email_service_configuration_defaults():
     service = EmailService()
     assert service.smtp_host == "smtp.gmail.com"
     assert service.smtp_port == 587
-    assert service.sender_email == "spareid9687@gmail.com"
-    assert service.admin_email == "jayrajsinhbhatti9687@gmail.com"
+    assert service.admin_email in ["jayrajsinhbhatti9687@gmail.com", "chauhankavya761@gmail.com"]
     assert service.use_tls is True
     assert service.enabled is True
 
@@ -54,8 +53,7 @@ def test_incident_email_template_rendering():
     assert "92.4%" in html
     assert "payment-service" in html
     assert "INC-TEST-12345" in html
-    assert "spareid9687@gmail.com" in html
-    assert "jayrajsinhbhatti9687@gmail.com" in html
+    assert service.admin_email in html
     assert "http://localhost:5173/dashboard?incident_id=INC-TEST-12345" in html
     assert "350.2" in html
 

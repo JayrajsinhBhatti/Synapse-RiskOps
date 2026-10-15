@@ -52,6 +52,8 @@ import {
   Timer,
   Command,
   Flame,
+  GitFork,
+  Sparkles,
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -71,12 +73,15 @@ const NAV_SECTIONS = [
     items: [
       { id: 'risk', label: 'Risk Ranking', icon: BarChart3, description: 'Risk scores & telemetry' },
       { id: 'rca', label: 'Root Cause (RCA)', icon: Brain, description: 'Autonomous causal graph' },
+      { id: 'cascade-planner', label: 'Cascade Interception', icon: GitFork, description: 'Failure propagation & plans' },
+      { id: 'causal-graph', label: 'Causal Graph (Chaos)', icon: Network, description: 'Chaos-calibrated causal graph' },
       { id: 'risk-history', label: 'Risk History', icon: History, description: 'Model evaluations log' },
     ],
   },
   {
     heading: 'Automation',
     items: [
+      { id: 'dry-run', label: 'Dry-Run Twin', icon: Sparkles, description: 'Counterfactual predictive twin' },
       { id: 'remediation', label: 'Runbooks & Remediation', icon: Play, description: 'Safe playbook execution' },
       { id: 'services', label: 'Services Catalog', icon: Server, description: 'Service mesh inventory' },
     ],

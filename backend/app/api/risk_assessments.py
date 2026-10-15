@@ -73,6 +73,10 @@ async def create_risk_assessment(
         active_mode = request.headers.get("x-synapse-mode")
     active_mode = (active_mode or "demo").lower()
 
+    features = dict(assessment_data.features_used or {})
+    if assessment_data.conformal_interval:
+        features["conformal_interval"] = assessment_data.conformal_interval
+
     assessment = RiskAssessment(
         service_id=service_id,
         risk_score=assessment_data.risk_score,
@@ -80,7 +84,7 @@ async def create_risk_assessment(
         anomaly_score=assessment_data.anomaly_score,
         predicted_failure_time=assessment_data.predicted_failure_time,
         affected_services=assessment_data.affected_services,
-        features_used=assessment_data.features_used,
+        features_used=features if features else None,
         model_version=assessment_data.model_version,
         data_mode=active_mode,
     )

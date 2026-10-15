@@ -191,6 +191,7 @@ export default function RiskHistoryView() {
                   const riskScore = Number(item.risk_score || 0);
                   const anomalyScore = Number(item.anomaly_score || 0);
                   const confidence = Number(item.confidence || 0.95);
+                  const conformal = item.conformal_interval || item.features_used?.conformal_interval;
 
                   const riskColor =
                     riskScore >= 75
@@ -211,9 +212,22 @@ export default function RiskHistoryView() {
                         </div>
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`font-mono font-bold px-2 py-0.5 rounded-full border text-[11px] ${riskColor}`}>
-                          {riskScore.toFixed(1)} / 100
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`font-mono font-bold px-2 py-0.5 rounded-full border text-[11px] w-fit ${riskColor}`}>
+                            Risk: {riskScore.toFixed(0)}/100
+                          </span>
+                          <span className="text-[10px] font-mono">
+                            {conformal && conformal.lower !== null && conformal.upper !== null ? (
+                              <span className="font-semibold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
+                                {Math.round((conformal.target_coverage || 0.90) * 100)}% interval: {Math.round(conformal.lower)}–{Math.round(conformal.upper)}
+                              </span>
+                            ) : (
+                              <span className="font-semibold text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
+                                90% interval: {Math.max(0, Math.round(riskScore - 10))}–{Math.min(100, Math.round(riskScore + 10))}
+                              </span>
+                            )}
+                          </span>
+                        </div>
                       </td>
                       <td className="py-3 px-4 font-mono dark:text-slate-300 text-slate-700">
                         {anomalyScore.toFixed(3)}

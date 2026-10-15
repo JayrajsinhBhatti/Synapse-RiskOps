@@ -101,7 +101,12 @@ class SSEManager:
         def _val(attr: str):
             if isinstance(incident, dict):
                 return incident.get(attr)
-            return getattr(incident, attr, None)
+            if hasattr(incident, "__dict__") and attr in incident.__dict__:
+                return incident.__dict__[attr]
+            try:
+                return getattr(incident, attr, None)
+            except Exception:
+                return None
 
         inc_id = _val("id")
         service_id = _val("service_id")
@@ -126,7 +131,12 @@ class SSEManager:
         def _val(attr: str):
             if isinstance(incident, dict):
                 return incident.get(attr)
-            return getattr(incident, attr, None)
+            if hasattr(incident, "__dict__") and attr in incident.__dict__:
+                return incident.__dict__[attr]
+            try:
+                return getattr(incident, attr, None)
+            except Exception:
+                return None
 
         inc_id = _val("id")
         resolved_at = _val("resolved_at")

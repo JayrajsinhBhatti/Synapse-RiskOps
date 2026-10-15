@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { useIncidents, useServices, useUpdateIncidentStatus } from '../hooks/useIncidents';
+import { useIncidents, useServices, useUpdateIncidentStatus, useExecuteRemediation } from '../hooks/useIncidents';
 import { useAcknowledgeIncident, useAddIncidentNote, useIncidentNotes } from '../hooks/useAnalytics';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -45,9 +45,11 @@ export default function IncidentTimeline({
   const { data: incidentsData, isLoading, refetch } = useIncidents();
   const { data: servicesData } = useServices();
   const updateStatusMutation = useUpdateIncidentStatus();
+  const executeRemediationMutation = useExecuteRemediation();
   const acknowledgeMutation = useAcknowledgeIncident();
   const addNoteMutation = useAddIncidentNote();
   const { canRemediate, openAuthModal, user } = useAuth();
+  const [executingIncidentId, setExecutingIncidentId] = useState(null);
 
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
@@ -82,7 +84,7 @@ export default function IncidentTimeline({
       }
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        const serviceName = (serviceMap[inc.service_id] || inc.service_id || '').toLowerCase();
+        const serviceName = (inc.service_name || serviceMap[inc.service_id] || inc.root_cause || inc.service_id || '').toLowerCase();
         const matchesTitle = inc.title?.toLowerCase().includes(query);
         const matchesService = serviceName.includes(query);
         const matchesDesc = inc.description?.toLowerCase().includes(query);
@@ -112,6 +114,29 @@ export default function IncidentTimeline({
       status: 'RESOLVED',
       comment: 'Verification completed. System health metrics normalized.',
     });
+  };
+
+  const handleApproveAndExecute = async (e, inc) => {
+    e.stopPropagation();
+    if (!canRemediate) {
+      openAuthModal();
+      return;
+    }
+    setExecutingIncidentId(inc.id);
+    try {
+      const targetSvc = inc.service_name || serviceMap[inc.service_id] || inc.root_cause || 'payment-service';
+      await executeRemediationMutation.mutateAsync({
+        incident_id: inc.id,
+        failure_type: inc.predicted_failure_type || 'ANOMALOUS_SATURATION',
+        service_id: inc.service_id,
+        target: targetSvc,
+        action: 'SCALE_OUT_PODS',
+      });
+    } catch (err) {
+      console.error('Approval execution failed:', err);
+    } finally {
+      setExecutingIncidentId(null);
+    }
   };
 
   const handleAddNote = async (e, incId) => {
@@ -218,7 +243,7 @@ export default function IncidentTimeline({
             const isNotesExpanded = notesExpandedId === inc.id;
             const sevBadge = getSeverityBadge(inc.severity);
             const statusBadge = getStatusBadge(inc.status);
-            const serviceFriendlyName = serviceMap[inc.service_id] || inc.service_id || 'Global';
+            const serviceFriendlyName = inc.service_name || serviceMap[inc.service_id] || inc.root_cause || (inc.service_id ? String(inc.service_id).slice(0, 8) : 'Global');
 
             return (
               <div
@@ -289,17 +314,38 @@ export default function IncidentTimeline({
                     )}
 
                     {(inc.status === 'OPEN' || inc.status === 'ACKNOWLEDGED' || inc.status === 'INVESTIGATING') && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (onSelectIncident) onSelectIncident(inc);
-                          if (onOpenGuidance) onOpenGuidance();
-                        }}
-                        className="px-2.5 py-1 rounded-md bg-synapse-600 hover:bg-synapse-500 text-white font-medium shadow-sm transition-colors flex items-center gap-1"
-                      >
-                        <PlayCircle className="w-3.5 h-3.5" />
-                        Remediate
-                      </button>
+                      <>
+                        <button
+                          onClick={(e) => handleApproveAndExecute(e, inc)}
+                          disabled={executingIncidentId === inc.id || executeRemediationMutation.isPending}
+                          className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-sm transition-all flex items-center gap-1"
+                          title="Directly approve and execute remediation on this tab"
+                        >
+                          {executingIncidentId === inc.id ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              <span>Executing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <PlayCircle className="w-3 h-3 text-emerald-200" />
+                              <span>Approve & Execute</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onSelectIncident) onSelectIncident(inc);
+                            if (onOpenGuidance) onOpenGuidance();
+                          }}
+                          className="px-2 py-1 rounded-md dark:bg-slate-800 bg-slate-100 dark:hover:bg-slate-700 hover:bg-slate-200 dark:text-slate-300 text-slate-700 font-medium text-[11px] border dark:border-slate-700 border-slate-300 transition-colors flex items-center gap-1"
+                          title="Open AI Root Cause Guidance details"
+                        >
+                          <span>Guidance</span>
+                        </button>
+                      </>
                     )}
 
                     {inc.status === 'REMEDIATING' && (

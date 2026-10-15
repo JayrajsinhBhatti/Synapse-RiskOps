@@ -8,6 +8,7 @@ and centralizes chaos injection dispatch.
 import os
 import sys
 import time
+import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 import httpx
@@ -97,15 +98,15 @@ async def get_all_services_status():
     results = {}
     all_targets = {"api-gateway": f"http://localhost:{PORT}", **SERVICES}
 
-    async with httpx.AsyncClient(timeout=3.0) as client:
-        for name, base_url in all_targets.items():
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        async def _probe(name: str, base_url: str):
             try:
                 start = time.time()
                 resp = await client.get(f"{base_url}/health")
                 latency_ms = round((time.time() - start) * 1000, 1)
                 if resp.status_code == 200:
                     data = resp.json()
-                    results[name] = {
+                    return name, {
                         "service_name": name,
                         "url": base_url,
                         "status": data.get("status", "healthy"),
@@ -114,7 +115,7 @@ async def get_all_services_status():
                         "active_faults": data.get("active_faults", {}),
                     }
                 else:
-                    results[name] = {
+                    return name, {
                         "service_name": name,
                         "url": base_url,
                         "status": "degraded",
@@ -123,7 +124,7 @@ async def get_all_services_status():
                         "error": resp.text,
                     }
             except Exception as e:
-                results[name] = {
+                return name, {
                     "service_name": name,
                     "url": base_url,
                     "status": "offline",
@@ -131,6 +132,11 @@ async def get_all_services_status():
                     "has_active_fault": True,
                     "error": str(e),
                 }
+
+        probes = [_probe(name, url) for name, url in all_targets.items()]
+        probe_results = await asyncio.gather(*probes)
+        for name, data in probe_results:
+            results[name] = data
 
     healthy_count = sum(1 for s in results.values() if s["status"] == "healthy")
     return {
@@ -175,12 +181,14 @@ async def dispatch_chaos(payload: ChaosDispatchPayload):
                 err_val = 0.0
                 cpu_val = 35.0
                 if payload.fault_type == "latency":
-                    p99_val = 800.0 + payload.intensity * 2500.0
+                    p99_val = 1200.0 + payload.intensity * 2500.0
+                    err_val = 15.0
                 elif payload.fault_type in ("error_rate", "service_outage"):
-                    err_val = 100.0 if payload.fault_type == "service_outage" else (payload.intensity * 100.0)
-                    p99_val = 500.0 if payload.fault_type == "service_outage" else 45.0
+                    err_val = 100.0 if payload.fault_type == "service_outage" else max(40.0, payload.intensity * 100.0)
+                    p99_val = 650.0
                 elif payload.fault_type == "cpu_spike":
-                    cpu_val = 50.0 + payload.intensity * 45.0
+                    cpu_val = 82.0 + payload.intensity * 15.0
+                    p99_val = 450.0
 
                 fault_metric = {
                     "service_name": payload.service_name,
@@ -206,16 +214,19 @@ async def clear_all_chaos():
     """Restores all 10 microservices to baseline healthy operation."""
     all_targets = {"api-gateway": f"http://localhost:{PORT}", **SERVICES}
     cleared = []
-    async with httpx.AsyncClient(timeout=4.0) as client:
-        for name, url in all_targets.items():
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        async def _clear_svc(name, url):
             try:
                 await client.post(f"{url}/chaos/clear")
-                cleared.append(name)
+                return name
             except Exception:
-                pass
+                return None
 
-        # Send recovery metric signals to Synapse RiskOps
-        for name in cleared:
+        results = await asyncio.gather(*[_clear_svc(n, u) for n, u in all_targets.items()])
+        cleared = [r for r in results if r]
+
+        # Send recovery metric signals to Synapse RiskOps in parallel
+        async def _send_rec(name):
             try:
                 rec_metric = {
                     "service_name": name,
@@ -230,6 +241,8 @@ async def clear_all_chaos():
                 await client.post("http://localhost:8080/api/v1/ingest/metrics", json=rec_metric, timeout=2.0)
             except Exception:
                 pass
+
+        await asyncio.gather(*[_send_rec(name) for name in cleared])
 
     return {"status": "cleared", "services_reset": cleared}
 

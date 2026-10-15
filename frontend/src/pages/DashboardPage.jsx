@@ -22,6 +22,9 @@ import RiskHistoryView from '../components/risk/RiskHistoryView';
 import ReliabilityAnalyticsView from '../components/analytics/ReliabilityAnalyticsView';
 import ServiceMetricsViewer from '../components/observability/ServiceMetricsViewer';
 import ChaosExperimentDashboard from '../components/chaos/ChaosExperimentDashboard';
+import CascadePlannerView from '../components/cascade/CascadePlannerView';
+import CausalGraphView from '../components/causal/CausalGraphView';
+import DryRunTwinView from '../components/dryrun/DryRunTwinView';
 import { useIncidents, useServices } from '../hooks/useIncidents';
 import { useReliabilityMetrics } from '../hooks/useAnalytics';
 import { useWorkspace } from '../context/WorkspaceContext';
@@ -144,9 +147,31 @@ export default function DashboardPage({ activeView, onViewChange }) {
     );
   }
 
+  // View: Cascade Interception Planner
+  if (activeView === 'cascade-planner' || activeView === 'cascade') {
+    return <CascadePlannerView />;
+  }
+
+  // View: Chaos-Calibrated Causal Graph
+  if (activeView === 'causal-graph' || activeView === 'causal') {
+    return <CausalGraphView />;
+  }
+
   // View: Runbooks & Remediation
   if (activeView === 'remediation') {
-    return <RemediationView />;
+    return <RemediationView onViewChange={onViewChange} />;
+  }
+
+  // View: Dry-Run Twin (Counterfactual Remediation)
+  if (activeView === 'dry-run' || activeView === 'twin') {
+    return (
+      <DryRunTwinView
+        preselectedIncident={selectedIncident}
+        onNavigateToRemediation={() => {
+          if (onViewChange) onViewChange('remediation');
+        }}
+      />
+    );
   }
 
   // View: Services Catalog

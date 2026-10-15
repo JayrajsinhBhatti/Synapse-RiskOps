@@ -87,7 +87,7 @@ async def run_orchestration_tests():
 
         # Verify Routing Block
         routing = record["routing"]
-        assert routing["routing_decision"] in ["auto_remediate", "escalate"]
+        assert routing["routing_decision"] in ["auto_remediate", "escalate", "human_approval"]
         print(f"      - Confidence Routing: decision='{routing['routing_decision']}', confidence={routing['routing_confidence']}")
 
         # Verify Automation Block

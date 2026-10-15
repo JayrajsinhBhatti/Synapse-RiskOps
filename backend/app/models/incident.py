@@ -8,6 +8,7 @@ Matches the shared schema contract in shared/schemas/incident_record.schema.json
 """
 
 import uuid
+from typing import Optional
 from sqlalchemy import (
     Column,
     DateTime,
@@ -101,6 +102,12 @@ class Incident(Base):
         cascade="all, delete-orphan",
         order_by="IncidentHistory.changed_at.desc()",
     )
+
+    @property
+    def service_name(self) -> Optional[str]:
+        if "service" in self.__dict__ and self.__dict__["service"] is not None:
+            return getattr(self.__dict__["service"], "service_name", None) or self.root_cause
+        return self.root_cause or None
 
     def __repr__(self) -> str:
         return f"<Incident(id='{self.id}', title='{self.title}', status='{self.status}', severity='{self.severity}')>"

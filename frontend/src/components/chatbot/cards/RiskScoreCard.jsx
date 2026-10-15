@@ -87,6 +87,22 @@ export default function RiskScoreCard({ data }) {
               style={{ width: `${Math.min(100, Math.max(5, risk_score))}%` }}
             />
           </div>
+          {data.conformal_interval && (
+            <div className="text-[10px] font-mono mt-1.5 text-gray-300">
+              {data.conformal_interval.is_calibrated && data.conformal_interval.lower != null ? (
+                <span>
+                  {Math.round((data.conformal_interval.target_coverage || 0.9) * 100)}% interval:{' '}
+                  <strong className="text-white">
+                    {Math.round(data.conformal_interval.lower)}–{Math.round(data.conformal_interval.upper)}
+                  </strong>
+                </span>
+              ) : (
+                <span className="italic text-gray-400">
+                  Interval: {data.conformal_interval.status === 'insufficient_data' ? 'Insufficient data' : 'Uncalibrated'}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Prediction & Horizon */}

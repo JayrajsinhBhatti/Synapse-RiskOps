@@ -26,8 +26,9 @@ from typing import Dict, Optional, Tuple, List, Any
 from app.models.anomaly_detector import AnomalyDetector
 from app.models.failure_forecaster import FailureForecaster
 from app.services.graph_builder import GraphBuilder
+from app.services.conformal_calibrator import ConformalCalibrator
 from app.schemas.prediction import (
-    PredictionResponse, AnomalyDetail, ForecastDetail, RiskTier,
+    PredictionResponse, AnomalyDetail, ForecastDetail, RiskTier, ConformalInterval,
 )
 import networkx as nx
 
@@ -51,6 +52,7 @@ class RiskEngine:
     def __init__(self):
         self.anomaly_detector = AnomalyDetector(contamination=0.03)
         self.failure_forecaster = FailureForecaster(forecast_periods=12)
+        self.conformal_calibrator = ConformalCalibrator()
         self.graph_builder = GraphBuilder()
         try:
             self.graph_builder.build_graph()
@@ -62,39 +64,151 @@ class RiskEngine:
         self._training_samples: int = 0
         self._services_list = []
 
-    def train(self, df: pd.DataFrame) -> Dict:
+    def calibrate_conformal(
+        self,
+        cal_df: pd.DataFrame,
+        target_coverage: float = 0.90,
+        max_samples: int = 300,
+    ) -> Dict[str, Any]:
         """
-        Train both sub-models on historical metrics data.
+        Calibrate Conformal Risk Intervals on held-out metrics data.
+
+        Args:
+            cal_df: Held-out calibration DataFrame with raw metrics.
+            target_coverage: Desired marginal coverage (default 0.90 / 90%).
+            max_samples: Maximum number of calibration samples to evaluate.
+
+        Returns:
+            Calibration summary dictionary.
+        """
+        if len(cal_df) < self.conformal_calibrator.min_samples:
+            return self.conformal_calibrator.calibrate([], [], target_coverage=target_coverage)
+
+        # Precompute forecast risks for unique services to avoid redundant fitting
+        forecast_cache = {}
+        for svc in cal_df["service_name"].unique():
+            try:
+                forecast_cache[svc] = self.failure_forecaster.forecast(svc)["forecast_risk"]
+            except Exception:
+                forecast_cache[svc] = 0.0
+
+        # Sample if needed, preserving anomalies if available
+        if len(cal_df) > max_samples:
+            if "is_anomaly" in cal_df.columns and cal_df["is_anomaly"].sum() > 0:
+                anoms = cal_df[cal_df["is_anomaly"] == 1]
+                normals = cal_df[cal_df["is_anomaly"] == 0]
+                n_anom = min(len(anoms), max(10, int(max_samples * 0.2)))
+                n_norm = min(len(normals), max_samples - n_anom)
+                sample_df = pd.concat([
+                    anoms.sample(n=n_anom, random_state=42),
+                    normals.sample(n=n_norm, random_state=42),
+                ]).sample(frac=1.0, random_state=42)
+            else:
+                sample_df = cal_df.sample(n=max_samples, random_state=42)
+        else:
+            sample_df = cal_df
+
+        y_true_list = []
+        y_pred_list = []
+
+        for _, row in sample_df.iterrows():
+            svc = row["service_name"]
+            row_dict = row.to_dict()
+            y_true = self.conformal_calibrator.compute_ground_truth_risk(row_dict)
+
+            # Predict risk for calibration row
+            anomaly_score, is_anomaly, _, _ = self.anomaly_detector.predict(
+                row_dict, return_guardrail=True
+            )
+            forecast_risk = forecast_cache.get(svc, 0.0)
+
+            if is_anomaly:
+                raw_score = (
+                    self.ACTIVE_ANOMALY_WEIGHT * anomaly_score
+                    + self.ACTIVE_FORECAST_WEIGHT * forecast_risk
+                )
+            else:
+                raw_score = (
+                    self.ANOMALY_WEIGHT * anomaly_score
+                    + self.FORECAST_WEIGHT * forecast_risk
+                )
+            local_risk = round(min(100.0, max(0.0, raw_score * 100.0)), 2)
+
+            y_true_list.append(y_true)
+            y_pred_list.append(local_risk)
+
+        return self.conformal_calibrator.calibrate(
+            y_true=y_true_list,
+            y_pred=y_pred_list,
+            target_coverage=target_coverage,
+        )
+
+    def train(
+        self,
+        df: pd.DataFrame,
+        calibration_df: Optional[pd.DataFrame] = None,
+        calibration_fraction: float = 0.20,
+    ) -> Dict:
+        """
+        Train sub-models on historical metrics data and calibrate conformal risk intervals
+        on a separate held-out calibration dataset.
 
         Args:
             df: Full metrics DataFrame from CSVLoader/DataPreprocessor.
                 Must have raw (non-scaled) values for forecaster.
+            calibration_df: Optional dedicated held-out calibration dataset.
+                If not provided, a split of df is reserved for calibration.
+            calibration_fraction: Fraction of df to reserve for calibration if calibration_df is None.
 
         Returns:
             Combined training summary.
         """
         logger.info(f"Training RiskEngine on {len(df)} samples...")
 
+        # Separate training and calibration sets for split conformal prediction
+        if calibration_df is not None:
+            train_df = df
+            cal_df = calibration_df
+        elif len(df) >= 50:
+            n_cal = max(30, int(len(df) * calibration_fraction))
+            train_df = df.iloc[:-n_cal].copy()
+            cal_df = df.iloc[-n_cal:].copy()
+        else:
+            train_df = df
+            cal_df = pd.DataFrame()
+
         # Train anomaly detector (it handles its own scaling)
-        anomaly_summary = self.anomaly_detector.train(df)
+        anomaly_summary = self.anomaly_detector.train(train_df)
 
         # Train failure forecaster (needs raw timestamps + values)
-        forecast_summary = self.failure_forecaster.train(df)
+        forecast_summary = self.failure_forecaster.train(train_df)
 
         self.is_trained = True
         self._last_trained_at = datetime.now(timezone.utc).isoformat()
         self._training_samples = len(df)
         self._services_list = list(df["service_name"].unique())
 
+        # Calibrate conformal prediction on held-out calibration set
+        if len(cal_df) >= self.conformal_calibrator.min_samples:
+            conformal_summary = self.calibrate_conformal(cal_df)
+        else:
+            conformal_summary = self.conformal_calibrator.calibrate([], [])
+
         combined = {
             "anomaly_detector": anomaly_summary,
             "failure_forecaster": forecast_summary,
+            "conformal_calibration": conformal_summary,
             "total_samples": len(df),
+            "training_samples": len(train_df),
+            "calibration_samples": conformal_summary.get("calibration_samples", 0),
             "services": self._services_list,
             "trained_at": self._last_trained_at,
         }
 
-        logger.info(f"RiskEngine training complete: {len(self._services_list)} services")
+        logger.info(
+            f"RiskEngine training complete: {len(self._services_list)} services, "
+            f"Conformal calibrated: {conformal_summary.get('is_calibrated')}"
+        )
         return combined
 
     def score(
@@ -173,11 +287,20 @@ class RiskEngine:
         else:
             predicted_failure_type = forecast_result["predicted_failure_type"]
 
-        # 7. Compute 95% confidence interval based on model confidence
-        uncertainty_margin = round((1.0 - confidence) * 15.0, 2)
-        ci_lower = round(max(0.0, final_risk_score - uncertainty_margin), 2)
-        ci_upper = round(min(100.0, final_risk_score + uncertainty_margin), 2)
-        risk_ci = {"lower": ci_lower, "upper": ci_upper}
+        # 7. Compute Conformal Risk Interval (Split Conformal Prediction)
+        conformal_interval = self.conformal_calibrator.predict_interval(
+            point_estimate=final_risk_score,
+            target_coverage=0.90,
+        )
+
+        # Backward compatibility: populate confidence_interval from calibrated interval, or fallback
+        if conformal_interval.is_calibrated and conformal_interval.lower is not None:
+            risk_ci = {"lower": conformal_interval.lower, "upper": conformal_interval.upper}
+        else:
+            uncertainty_margin = round((1.0 - confidence) * 15.0, 2)
+            ci_lower = round(max(0.0, final_risk_score - uncertainty_margin), 2)
+            ci_upper = round(min(100.0, final_risk_score + uncertainty_margin), 2)
+            risk_ci = {"lower": ci_lower, "upper": ci_upper}
 
         forecast_ci = {
             "lower": round(max(0.0, forecast_risk - (1.0 - confidence) * 0.15), 4),
@@ -194,6 +317,7 @@ class RiskEngine:
             risk_tier=risk_tier,
             confidence=round(confidence, 4),
             confidence_interval=risk_ci,
+            conformal_interval=conformal_interval,
             predicted_failure_type=predicted_failure_type,
             prediction_horizon_minutes=forecast_result["prediction_horizon_minutes"],
             anomaly_detail=AnomalyDetail(
@@ -351,9 +475,15 @@ class RiskEngine:
 
     def get_status(self) -> Dict:
         """Return current model status for /api/model/status."""
+        cal_status = self.conformal_calibrator.get_status()
         return {
             "anomaly_detector_trained": self.anomaly_detector.is_trained,
             "failure_forecaster_trained": self.failure_forecaster.is_trained,
+            "conformal_calibrated": cal_status["is_calibrated"],
+            "conformal_status": cal_status["status"],
+            "conformal_samples": cal_status["calibration_samples"],
+            "conformal_q_hat": cal_status["q_hat"],
+            "conformal_coverage": cal_status["target_coverage"],
             "training_samples": self._training_samples,
             "services_modeled": self._services_list,
             "last_trained_at": self._last_trained_at,

@@ -87,6 +87,7 @@ class IncidentResponse(BaseModel):
     status: str
 
     service_id: Optional[UUID] = None
+    service_name: Optional[str] = None
 
     risk_score: Optional[Decimal] = None
     confidence: Optional[Decimal] = None

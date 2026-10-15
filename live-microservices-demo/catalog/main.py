@@ -103,16 +103,15 @@ PRODUCTS_STATIC = [
 ]
 
 
-async def _enrich_with_inventory(product: dict) -> Product:
-    stock_count = 50
+async def _get_inventory_map() -> dict:
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{INVENTORY_SERVICE_URL}/inventory/{product['id']}")
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            resp = await client.get(f"{INVENTORY_SERVICE_URL}/inventory")
             if resp.status_code == 200:
-                stock_count = resp.json().get("stock_count", 50)
+                return resp.json().get("inventory", {})
     except Exception:
         pass
-    return Product(**product, stock_count=stock_count)
+    return {}
 
 
 @app.get("/products", response_model=List[Product])
@@ -127,10 +126,11 @@ async def list_products(
         query = q.lower()
         results = [p for p in results if query in p["name"].lower() or query in p["description"].lower()]
 
-    # Fetch live stock from inventory-service for each product
-    enriched = []
-    for p in results:
-        enriched.append(await _enrich_with_inventory(p))
+    stock_map = await _get_inventory_map()
+    enriched = [
+        Product(**p, stock_count=stock_map.get(p["id"], 50))
+        for p in results
+    ]
     return enriched
 
 
@@ -144,7 +144,8 @@ async def get_categories():
 async def get_product(product_id: str):
     for p in PRODUCTS_STATIC:
         if p["id"] == product_id:
-            return await _enrich_with_inventory(p)
+            stock_map = await _get_inventory_map()
+            return Product(**p, stock_count=stock_map.get(p["id"], 50))
     raise HTTPException(status_code=404, detail="Product not found")
 
 

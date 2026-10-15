@@ -181,7 +181,7 @@ async def list_incidents(
     Return list of incidents with optional filtering by status, severity, service, and operational mode.
     Ordered by detected_at descending.
     """
-    query = select(Incident).order_by(Incident.detected_at.desc())
+    query = select(Incident).order_by(Incident.updated_at.desc(), Incident.detected_at.desc())
 
     if status_filter:
         query = query.where(Incident.status == status_filter.upper())

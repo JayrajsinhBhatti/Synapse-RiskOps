@@ -109,6 +109,32 @@ class ForecastDetail(BaseModel):
     confidence_interval: Optional[Dict[str, float]] = Field(default=None, description="Confidence interval [lower, upper] for forecast")
 
 
+class ConformalInterval(BaseModel):
+    """
+    Conformal Risk Interval quantifying prediction uncertainty via Split Conformal Prediction.
+    
+    Provides finite-sample marginal coverage >= 1 - alpha under exchangeability.
+    Note: Quantifies risk score uncertainty; does NOT represent probability of failure.
+    """
+    point_estimate: float = Field(..., ge=0, le=100, description="Predicted risk score point estimate (0-100)")
+    lower: Optional[float] = Field(None, ge=0, le=100, description="Lower risk bound clipped to [0, 100]")
+    upper: Optional[float] = Field(None, ge=0, le=100, description="Upper risk bound clipped to [0, 100]")
+    target_coverage: float = Field(default=0.90, ge=0.50, le=0.99, description="Target coverage level (e.g. 0.90 for 90%)")
+    interval_width: Optional[float] = Field(None, ge=0, le=100, description="Width of the conformal risk interval (upper - lower)")
+    is_calibrated: bool = Field(..., description="Whether conformal calibration succeeded with sufficient held-out data")
+    status: str = Field(..., description="Calibration status: 'calibrated', 'insufficient_data', or 'uncalibrated'")
+    method: str = Field(default="split_conformal_residual", description="Conformal prediction method name")
+    calibration_samples: int = Field(default=0, description="Number of held-out calibration samples used")
+    q_hat: Optional[float] = Field(None, description="Calibrated nonconformity quantile threshold")
+    assumptions_validity_note: Optional[str] = Field(
+        default=(
+            "Guarantees >= 1-alpha marginal coverage under the assumption that test telemetry "
+            "is exchangeable with held-out calibration data. Does NOT represent probability of failure."
+        ),
+        description="Assumptions, scope, and limitation disclaimers"
+    )
+
+
 class PredictionResponse(BaseModel):
     """
     Response from POST /api/risk-score.
@@ -124,6 +150,10 @@ class PredictionResponse(BaseModel):
     risk_tier: RiskTier = Field(..., description="Classified risk level: healthy / watch / critical")
     confidence: float = Field(..., ge=0, le=1, description="Model confidence (0-1)")
     confidence_interval: Optional[Dict[str, float]] = Field(default=None, description="Risk score 95% confidence interval")
+    conformal_interval: Optional[ConformalInterval] = Field(
+        default=None,
+        description="Conformal risk interval quantifying prediction uncertainty with finite-sample coverage"
+    )
 
     # Failure prediction
     predicted_failure_type: str = Field(default="none", description="Type of predicted failure")
@@ -165,6 +195,12 @@ class ModelStatusResponse(BaseModel):
     """Response for GET /api/model/status — reports training state."""
     anomaly_detector_trained: bool = False
     failure_forecaster_trained: bool = False
+    conformal_calibrated: bool = False
+    conformal_status: str = "uncalibrated"
+    conformal_samples: int = 0
+    conformal_q_hat: Optional[float] = None
+    conformal_coverage: float = 0.90
     training_samples: int = 0
     services_modeled: List[str] = Field(default_factory=list)
     last_trained_at: Optional[str] = None
+

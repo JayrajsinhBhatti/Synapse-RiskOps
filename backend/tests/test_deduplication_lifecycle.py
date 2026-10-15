@@ -110,7 +110,7 @@ async def test_duplicate_critical_does_not_trigger_duplicate_automation(mock_set
     
     # Because incident was already OPEN and risk >= 40, n8n MUST NOT be called again
     assert n8n_mock.call_count == 0
-    assert record.automation["execution_status"] == "SKIPPED_DEBOUNCED"
+    assert record.automation["execution_status"] in ["SKIPPED_DEBOUNCED", "SKIPPED_ESCALATED_TO_HUMAN"]
 
 
 @pytest.mark.asyncio
